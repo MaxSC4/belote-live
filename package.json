@@ -1,0 +1,14 @@
+{
+  "name": "belote",
+  "version": "1.0.0",
+  "description": "Jeu de belote multijoueur en ligne (front React + backend Node/WebSocket).",
+  "main": "index.js",
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
