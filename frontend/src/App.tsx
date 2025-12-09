@@ -95,6 +95,9 @@ function App() {
   const [showEndOverlay, setShowEndOverlay] = useState(false);
   const prevPhaseRef = useRef<string | null>(null);
 
+  // Hover sur les cartes de la main
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   // Injecter les keyframes une fois
   useEffect(() => {
     const styleEl = document.createElement("style");
@@ -159,6 +162,7 @@ function App() {
       setRoomPlayers([]);
       setWsError(null);
       setGameState(null);
+      setHoveredIndex(null);
       return;
     }
 
@@ -249,7 +253,6 @@ function App() {
   const currentPhase = gameState?.phase ?? "—";
   const trumpSymbol = gameState?.trumpSuit ?? "—";
 
-  // Mappage 0–3 vers positions de table, en gardant "moi" en bas
   function seatToTablePosition(seat: number | null): TablePosition | null {
     if (seat === null) return null;
     if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
@@ -265,7 +268,6 @@ function App() {
     playersByPosition[pos] = player;
   });
 
-  // Pour l'affichage : J1–J4
   function playerNameForSeat(seat: number): string {
     const player = roomPlayers.find((p) => p.seat === seat);
     const label = `J${seat + 1}`;
@@ -282,7 +284,6 @@ function App() {
 
   // ---- Animations : gagnant de pli & fin de donne ----
 
-  // Bannière "Pli pour ..."
   useEffect(() => {
     if (!gameState || !gameState.trick) return;
     if (gameState.trick.winner === undefined) return;
@@ -292,7 +293,6 @@ function App() {
     return () => clearTimeout(timer);
   }, [gameState?.trick?.winner]);
 
-  // Overlay de score final quand on passe à Finished
   useEffect(() => {
     const phase = gameState?.phase;
     const prev = prevPhaseRef.current;
@@ -684,8 +684,8 @@ function App() {
                 gridColumn: 2,
                 gridRow: 2,
                 width: "100%",
-                maxWidth: 380,
-                minHeight: 150,
+                maxWidth: 400,
+                minHeight: 180,
                 borderRadius: "0.85rem",
                 border: "1px solid rgba(15,23,42,0.9)",
                 background:
@@ -765,7 +765,7 @@ function App() {
               <div
                 style={{
                   position: "relative",
-                  height: "5.4rem",
+                  height: "6.8rem",
                   maxWidth: "100%",
                   margin: "0 auto",
                 }}
@@ -780,10 +780,15 @@ function App() {
                   const angle =
                     total > 1 ? -maxAngle + index * angleStep : 0;
 
-                  const centerShift = (index - (total - 1) / 2) * 30;
-                  const offsetY = -Math.abs(angle) * 0.18;
+                  const centerShift = (index - (total - 1) / 2) * 34;
+                  const offsetY = -Math.abs(angle) * 0.22;
 
-                  const transform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
+                  const baseTransform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
+
+                  const isHovered = clickable && hoveredIndex === index;
+                  const finalTransform = isHovered
+                    ? `${baseTransform} translateY(-10px) scale(1.08)`
+                    : baseTransform;
 
                   return (
                     <button
@@ -791,17 +796,28 @@ function App() {
                       type="button"
                       onClick={() => clickable && handlePlayCard(card)}
                       disabled={!clickable}
+                      onMouseEnter={() =>
+                        clickable && setHoveredIndex(index)
+                      }
+                      onMouseLeave={() =>
+                        setHoveredIndex((prev) =>
+                          prev === index ? null : prev
+                        )
+                      }
                       style={{
                         position: "absolute",
                         left: "50%",
                         bottom: 0,
-                        transform,
+                        transform: finalTransform,
                         transformOrigin: "50% 100%",
                         border: "none",
                         padding: 0,
                         margin: 0,
                         background: "transparent",
                         cursor: clickable ? "pointer" : "default",
+                        transition:
+                          "transform 0.15s ease-out, filter 0.15s ease-out",
+                        filter: isHovered ? "brightness(1.05)" : "none",
                       }}
                     >
                       <CardSvg card={card} />
@@ -1170,21 +1186,21 @@ function TrickCardView(props: {
             : "center",
         justifySelf,
         alignSelf,
-        gap: "0.2rem",
+        gap: "0.25rem",
         animation: `${animationName} 0.22s ease-out`,
       }}
     >
       <div
         style={{
-          width: 40,
-          height: 56,
+          width: 52,
+          height: 72,
         }}
       >
         <CardSvg card={card} small />
       </div>
       <span
         style={{
-          fontSize: "0.7rem",
+          fontSize: "0.75rem",
           color: "#e5e7eb",
           opacity: 0.9,
         }}
@@ -1198,15 +1214,20 @@ function TrickCardView(props: {
 function CardSvg(props: { card: Card; small?: boolean }) {
   const { card, small } = props;
   const isRed = card.suit === "♥" || card.suit === "♦";
-  const width = small ? 40 : 52;
-  const height = small ? 56 : 72;
+
+  // Cartes plus grandes : main > pli
+  const width = small ? 52 : 68;
+  const height = small ? 72 : 92;
 
   return (
     <svg
       viewBox="0 0 52 72"
       width={width}
       height={height}
-      style={{ display: "block", filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.75))" }}
+      style={{
+        display: "block",
+        filter: "drop-shadow(0 8px 14px rgba(0,0,0,0.85))",
+      }}
     >
       <defs>
         <linearGradient id="card-bg" x1="0" y1="0" x2="1" y2="1">
