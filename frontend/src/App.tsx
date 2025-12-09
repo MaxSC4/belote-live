@@ -1,8 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { config } from "./config";
 import type { Card, DealResponse } from "./gameTypes";
 
 type View = "lobby" | "game";
+
+interface RoomPlayer {
+  id: string;
+  nickname: string;
+}
+
+type RoomUpdateMessage = {
+  type: "room_update";
+  payload: {
+    roomCode: string;
+    players: RoomPlayer[];
+  };
+};
+
+type ErrorMessage = {
+  type: "error";
+  payload: {
+    message: string;
+  };
+};
 
 function App() {
   const [view, setView] = useState<View>("lobby");
@@ -13,7 +33,12 @@ function App() {
   const [isLoadingHand, setIsLoadingHand] = useState(false);
   const [handError, setHandError] = useState<string | null>(null);
 
-  // Simple navigation locale (backend plus tard pour de "vraies" rooms)
+  const [wsStatus, setWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [roomPlayers, setRoomPlayers] = useState<RoomPlayer[]>([]);
+  const [wsError, setWsError] = useState<string | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+
   const handleJoin = (event: React.FormEvent) => {
     event.preventDefault();
     if (!nickname || !roomCode) return;
@@ -21,12 +46,11 @@ function App() {
   };
 
   const handleCreateRoom = () => {
-    // Plus tard : demander un vrai code au backend
-    const generatedCode = "TABLE42";
+    const generatedCode = "TABLE42"; // plus tard : backend
     setRoomCode(generatedCode);
   };
 
-  // Quand on passe en vue "game", on va chercher une donne côté backend
+  // Récupérer une donne au passage en vue "game"
   useEffect(() => {
     if (view !== "game") return;
 
@@ -41,8 +65,6 @@ function App() {
         }
 
         const data: DealResponse = await response.json();
-
-        // Pour l'instant, on se considère comme "joueur 0"
         const myHand = data.hands["0"] || [];
         setHand(myHand);
       } catch (error) {
@@ -55,6 +77,70 @@ function App() {
 
     fetchDeal();
   }, [view]);
+
+  // Gestion WebSocket : connexion / join_room / updates
+  useEffect(() => {
+    if (view !== "game") {
+      // On ferme la connexion si on quitte la table
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+      wsRef.current = null;
+      setWsStatus("disconnected");
+      setRoomPlayers([]);
+      setWsError(null);
+      return;
+    }
+
+    setWsStatus("connecting");
+    setWsError(null);
+
+    const ws = new WebSocket(config.wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setWsStatus("connected");
+
+      // On envoie join_room dès l'ouverture
+      const message = {
+        type: "join_room",
+        payload: {
+          roomCode,
+          nickname,
+        },
+      };
+      ws.send(JSON.stringify(message));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as RoomUpdateMessage | ErrorMessage;
+
+        if (data.type === "room_update") {
+          if (data.payload.roomCode === roomCode) {
+            setRoomPlayers(data.payload.players);
+          }
+        } else if (data.type === "error") {
+          setWsError(data.payload.message);
+        }
+      } catch (error) {
+        console.error("Message WS invalide", error);
+      }
+    };
+
+    ws.onerror = () => {
+      setWsStatus("disconnected");
+      setWsError("Erreur de connexion WebSocket.");
+    };
+
+    ws.onclose = () => {
+      setWsStatus("disconnected");
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [view, roomCode, nickname]);
 
   // ---------- VUE LOBBY ----------
 
@@ -222,7 +308,15 @@ function App() {
         <div>
           <h1 style={{ margin: 0 }}>Table {roomCode}</h1>
           <p style={{ margin: 0, fontSize: "0.9rem", color: "#9ca3af" }}>
-            Connecté en tant que <strong>{nickname}</strong> (joueur 0 pour l’instant)
+            Connecté en tant que <strong>{nickname}</strong>
+          </p>
+          <p style={{ margin: 0, fontSize: "0.8rem", color: "#6b7280" }}>
+            WebSocket :{" "}
+            {wsStatus === "connected"
+              ? "connecté ✅"
+              : wsStatus === "connecting"
+              ? "connexion en cours..."
+              : "déconnecté ❌"}
           </p>
         </div>
         <button
@@ -241,10 +335,15 @@ function App() {
         </button>
       </header>
 
-      <main>
+      <main
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)",
+          gap: "1rem",
+        }}
+      >
         <section
           style={{
-            marginBottom: "1.5rem",
             padding: "1rem",
             borderRadius: "0.75rem",
             border: "1px solid rgba(148,163,184,0.3)",
@@ -306,17 +405,64 @@ function App() {
 
         <section
           style={{
-            fontSize: "0.85rem",
-            color: "#9ca3af",
+            padding: "1rem",
+            borderRadius: "0.75rem",
+            border: "1px solid rgba(148,163,184,0.3)",
+            background: "rgba(15,23,42,0.9)",
+            fontSize: "0.9rem",
           }}
         >
-          <p>
-            Pour le moment, les cartes sont distribuées côté serveur à chaque
-            entrée dans la table, et vous voyez la main du joueur 0.
-          </p>
-          <p>
-            Prochaines étapes : vraie gestion des joueurs, atout, plis, scores et
-            connexion en temps réel WebSocket.
+          <h2 style={{ marginTop: 0, fontSize: "1rem", marginBottom: "0.5rem" }}>
+            Joueurs à la table
+          </h2>
+
+          {wsError && (
+            <p style={{ color: "#f97373", fontSize: "0.9rem" }}>{wsError}</p>
+          )}
+
+          {roomPlayers.length === 0 && !wsError && (
+            <p style={{ color: "#9ca3af" }}>
+              En attente d&apos;autres joueurs...
+            </p>
+          )}
+
+          <ul style={{ listStyle: "none", paddingLeft: 0, margin: 0 }}>
+            {roomPlayers.map((player) => (
+              <li
+                key={player.id}
+                style={{
+                  padding: "0.4rem 0.5rem",
+                  borderRadius: "0.5rem",
+                  border: "1px solid rgba(148,163,184,0.3)",
+                  marginBottom: "0.4rem",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span>{player.nickname}</span>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "#6b7280",
+                  }}
+                >
+                  {player.id.slice(-4)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <p
+            style={{
+              marginTop: "0.75rem",
+              fontSize: "0.8rem",
+              color: "#6b7280",
+            }}
+          >
+            Ouvre la même URL dans un autre onglet / navigateur, entre le même
+            code de table et un autre pseudo : tu verras la liste des joueurs
+            se synchroniser en direct.
           </p>
         </section>
       </main>

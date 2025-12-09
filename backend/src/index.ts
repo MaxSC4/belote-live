@@ -1,11 +1,12 @@
 import http from "http";
 import { dealCards } from "./game/beloteEngine";
 import { PlayerId } from "./game/types";
+import { setupWebSocketServer } from "./realtime";
 
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
-    // CORS très permissif pour faciliter le dev front + back en local
+    // CORS pour le front
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -23,7 +24,7 @@ const server = http.createServer((req, res) => {
     }
 
     if (req.url === "/debug/deal") {
-        const dealer: PlayerId = 0; // pour l'instant, donneur fixe
+        const dealer: PlayerId = 0;
         const deal = dealCards(dealer);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(deal));
@@ -33,6 +34,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
 });
+
+setupWebSocketServer(server);
 
 server.listen(PORT, () => {
     console.log(`belote-live backend listening on port ${PORT}`);
