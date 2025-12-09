@@ -12,12 +12,22 @@ export interface DealResponse {
     trumpSuit?: Suit | null;
 }
 
-// Pour l'état de partie reçu via WebSocket
 export type GamePhase =
     | "WaitingForPlayers"
     | "ChoosingTrump"
     | "PlayingTricks"
     | "Finished";
+
+export interface TrickCardWS {
+    player: number;
+    card: Card;
+}
+
+export interface TrickWS {
+    cards: TrickCardWS[];
+    leader: number;
+    winner?: number;
+}
 
 export interface GameStateWS {
     phase: GamePhase;
@@ -25,5 +35,5 @@ export interface GameStateWS {
     currentPlayer: number;
     trumpSuit?: Suit;
     hands: Record<string, Card[]>;
-    // On peut ignorer trick/scores côté front pour l'instant
+    trick: TrickWS | null;
 }

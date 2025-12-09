@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
-import { GameState, GamePhase, startNewGame } from "./game/gameState";
-import { PlayerId } from "./game/types";
+import { GameState, GamePhase, playCard, startNewGame } from "./game/gameState";
+import { Card, PlayerId } from "./game/types";
 
 type ClientId = string;
 
@@ -46,6 +46,13 @@ interface StartGameMessage extends BaseMessage {
     type: "start_game";
 }
 
+interface PlayCardMessage extends BaseMessage {
+    type: "play_card";
+    payload: {
+        card: Card;
+    };
+}
+
 interface RoomUpdateMessage extends BaseMessage {
     type: "room_update";
     payload: {
@@ -68,7 +75,7 @@ interface ErrorMessage extends BaseMessage {
     };
 }
 
-type IncomingMessage = JoinRoomMessage | StartGameMessage;
+type IncomingMessage = JoinRoomMessage | StartGameMessage | PlayCardMessage;
 
 // --------- Utils envoi ---------
 
@@ -244,6 +251,67 @@ function handleStartGameMessage(client: ClientInfo) {
     room.gameState = startNewGame(dealer);
 
     broadcastGameState(room);
+    }
+
+    function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
+    if (!client.roomCode) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const room = rooms.get(client.roomCode);
+    if (!room || !room.gameState) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Aucune partie en cours dans cette room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (client.seat === undefined) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Vous n'avez pas de siège assigné." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const state = room.gameState;
+
+    if (state.phase !== GamePhase.PlayingTricks) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "La partie n'est pas en phase de plis." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (state.currentPlayer !== client.seat) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Ce n'est pas votre tour." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    try {
+        playCard(state, client.seat, message.payload.card);
+        broadcastGameState(room);
+    } catch (e: any) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: e?.message ?? "Erreur lors du jeu de la carte." },
+        };
+        send(client.ws, error);
+    }
 }
 
 function handleClientDisconnect(clientId: ClientId) {
@@ -304,16 +372,24 @@ export function setupWebSocketServer(httpServer: Server) {
             return;
         }
 
-        if (parsed.type === "join_room") {
+        switch (parsed.type) {
+            case "join_room":
             handleJoinRoomMessage(client, parsed);
-        } else if (parsed.type === "start_game") {
+            break;
+            case "start_game":
             handleStartGameMessage(client);
-        } else {
+            break;
+            case "play_card":
+            handlePlayCardMessage(client, parsed);
+            break;
+            default: {
             const msg: ErrorMessage = {
                 type: "error",
-                payload: { message: `Type de message inconnu` },
+                payload: { message: "Type de message inconnu." },
             };
             send(ws, msg);
+            break;
+            }
         }
         });
 

@@ -60,7 +60,7 @@ function App() {
     setRoomCode(generatedCode);
   };
 
-  // Fetch HTTP debug pour avoir une donne (on la gardera comme fallback)
+  // Fetch HTTP debug pour une donne (fallback)
   useEffect(() => {
     if (view !== "game") return;
 
@@ -164,13 +164,34 @@ function App() {
     wsRef.current.send(JSON.stringify(message));
   };
 
-  // Main à afficher :
-  // - si on a un GameState, on affiche la main du joueur 0 (DEBUG)
-  // - sinon, on utilise la main reçue par HTTP (debug / fallback)
+  // Déterminer mon siège (approximation : via nickname)
+  const mySeat =
+    roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
+
+  // Main affichée :
+  // - si on a un GameState et un seat, on affiche la main associée dans state.hands
+  // - sinon, fallback sur la main HTTP debug
   const effectiveHand: Card[] =
-    gameState && gameState.hands["0"]
-      ? gameState.hands["0"]
+    gameState && mySeat !== null
+      ? gameState.hands[String(mySeat)] || []
       : hand;
+
+  const isMyTurn =
+    gameState && mySeat !== null && gameState.currentPlayer === mySeat;
+
+  const handlePlayCard = (card: Card) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!gameState || mySeat === null) return;
+    if (!isMyTurn) return;
+
+    const message = {
+      type: "play_card",
+      payload: {
+        card,
+      },
+    };
+    wsRef.current.send(JSON.stringify(message));
+  };
 
   // ---------- VUE LOBBY ----------
 
@@ -316,6 +337,8 @@ function App() {
 
   // ---------- VUE JEU ----------
 
+  const currentPhase = gameState?.phase ?? "—";
+
   return (
     <div
       style={{
@@ -338,6 +361,7 @@ function App() {
           <h1 style={{ margin: 0 }}>Table {roomCode}</h1>
           <p style={{ margin: 0, fontSize: "0.9rem", color: "#9ca3af" }}>
             Connecté en tant que <strong>{nickname}</strong>
+            {mySeat !== null && ` (siège ${mySeat})`}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "#6b7280" }}>
             WebSocket :{" "}
@@ -412,49 +436,73 @@ function App() {
           )}
 
           {!isLoadingHand && !handError && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "0.5rem",
-                marginTop: "0.5rem",
-              }}
-            >
-              {effectiveHand.map((card, index) => (
-                <div
-                  key={`${card.rank}-${card.suit}-${index}`}
-                  style={{
-                    width: "3rem",
-                    height: "4.2rem",
-                    borderRadius: "0.5rem",
-                    border: "1px solid rgba(148,163,184,0.6)",
-                    background: "#0b1120",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "1rem",
-                    boxShadow: "0 10px 15px -3px rgba(0,0,0,0.6)",
-                  }}
-                >
-                  <span>{card.rank}</span>
-                  <span
-                    style={{
-                      fontSize: "1.2rem",
-                      color:
-                        card.suit === "♥" || card.suit === "♦"
-                          ? "#f97373"
-                          : "#e5e7eb",
-                    }}
-                  >
-                    {card.suit}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  marginTop: "0.5rem",
+                }}
+              >
+                {effectiveHand.map((card, index) => {
+                  const clickable = Boolean(isMyTurn);
+                  return (
+                    <button
+                      key={`${card.rank}-${card.suit}-${index}`}
+                      type="button"
+                      onClick={() => clickable && handlePlayCard(card)}
+                      disabled={!clickable}
+                      style={{
+                        width: "3rem",
+                        height: "4.2rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: clickable ? "#0b1120" : "#111827",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "1rem",
+                        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.6)",
+                        cursor: clickable ? "pointer" : "default",
+                      }}
+                    >
+                      <span>{card.rank}</span>
+                      <span
+                        style={{
+                          fontSize: "1.2rem",
+                          color:
+                            card.suit === "♥" || card.suit === "♦"
+                              ? "#f97373"
+                              : "#e5e7eb",
+                        }}
+                      >
+                        {card.suit}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p
+                style={{
+                  marginTop: "0.75rem",
+                  fontSize: "0.8rem",
+                  color: "#9ca3af",
+                }}
+              >
+                Phase : <strong>{currentPhase}</strong>{" "}
+                {gameState &&
+                  mySeat !== null &&
+                  gameState.currentPlayer === mySeat && (
+                    <span style={{ color: "#4ade80" }}>— c&apos;est à vous de jouer</span>
+                  )}
+              </p>
+            </>
           )}
 
-          {gameState && (
+          {gameState && gameState.trick && (
             <div
               style={{
                 marginTop: "1rem",
@@ -464,18 +512,78 @@ function App() {
                 color: "#9ca3af",
               }}
             >
-              <p style={{ margin: 0 }}>
-                Phase : <strong>{gameState.phase}</strong>
-              </p>
-              <p style={{ margin: 0 }}>
-                Donneur : <strong>Joueur {gameState.dealer}</strong>
-              </p>
-              <p style={{ margin: 0 }}>
-                Joueur courant : <strong>Joueur {gameState.currentPlayer}</strong>
-              </p>
-              {gameState.trumpSuit && (
-                <p style={{ margin: 0 }}>
-                  Atout : <strong>{gameState.trumpSuit}</strong>
+              <h3
+                style={{
+                  marginTop: 0,
+                  marginBottom: "0.5rem",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Pli en cours
+              </h3>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.75rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                {gameState.trick.cards.map((tc, idx) => (
+                  <div
+                    key={`${tc.player}-${idx}`}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(148,163,184,0.3)",
+                      background: "#020617",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        marginBottom: "0.25rem",
+                        color: "#9ca3af",
+                      }}
+                    >
+                      J{tc.player}
+                    </div>
+                    <div
+                      style={{
+                        width: "2.5rem",
+                        height: "3.6rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: "#0b1120",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      <span>{tc.card.rank}</span>
+                      <span
+                        style={{
+                          fontSize: "1.1rem",
+                          color:
+                            tc.card.suit === "♥" || tc.card.suit === "♦"
+                              ? "#f97373"
+                              : "#e5e7eb",
+                        }}
+                      >
+                        {tc.card.suit}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {gameState.trick.winner !== undefined && (
+                <p style={{ marginTop: "0.5rem" }}>
+                  Pli remporté par le joueur{" "}
+                  <strong>J{gameState.trick.winner}</strong>.
                 </p>
               )}
             </div>
@@ -542,9 +650,9 @@ function App() {
               color: "#6b7280",
             }}
           >
-            Rejoins la même table dans d&apos;autres onglets/navigateurs pour
-            voir la liste des joueurs se synchroniser en direct, puis clique sur
-            “Lancer la partie”.
+            Ouvre la même table dans plusieurs onglets/navigateurs, lance la
+            partie et joue des cartes à tour de rôle pour voir le pli se
+            construire en direct.
           </p>
         </section>
       </main>
