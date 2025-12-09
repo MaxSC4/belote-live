@@ -169,8 +169,6 @@ function App() {
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
   // Main affichée :
-  // - si on a un GameState et un seat, on affiche la main associée dans state.hands
-  // - sinon, fallback sur la main HTTP debug
   const effectiveHand: Card[] =
     gameState && mySeat !== null
       ? gameState.hands[String(mySeat)] || []
@@ -192,6 +190,8 @@ function App() {
     };
     wsRef.current.send(JSON.stringify(message));
   };
+
+  const currentPhase = gameState?.phase ?? "—";
 
   // ---------- VUE LOBBY ----------
 
@@ -337,7 +337,7 @@ function App() {
 
   // ---------- VUE JEU ----------
 
-  const currentPhase = gameState?.phase ?? "—";
+  const trumpSymbol = gameState?.trumpSuit ?? "—";
 
   return (
     <div
@@ -371,6 +371,21 @@ function App() {
               ? "connexion en cours..."
               : "déconnecté ❌"}
           </p>
+          {gameState && (
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "#9ca3af" }}>
+              Atout :{" "}
+              <strong
+                style={{
+                  color:
+                    trumpSymbol === "♥" || trumpSymbol === "♦"
+                      ? "#f97373"
+                      : "#e5e7eb",
+                }}
+              >
+                {trumpSymbol}
+              </strong>
+            </p>
+          )}
         </div>
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <button
@@ -495,10 +510,32 @@ function App() {
                 Phase : <strong>{currentPhase}</strong>{" "}
                 {gameState &&
                   mySeat !== null &&
-                  gameState.currentPlayer === mySeat && (
-                    <span style={{ color: "#4ade80" }}>— c&apos;est à vous de jouer</span>
+                  gameState.currentPlayer === mySeat &&
+                  gameState.phase === "PlayingTricks" && (
+                    <span style={{ color: "#4ade80" }}>
+                      — c&apos;est à vous de jouer
+                    </span>
                   )}
+                {gameState && gameState.phase === "Finished" && (
+                  <span style={{ color: "#facc15", marginLeft: "0.5rem" }}>
+                    — partie terminée
+                  </span>
+                )}
               </p>
+
+              {gameState && (
+                <p
+                  style={{
+                    marginTop: "0.25rem",
+                    fontSize: "0.8rem",
+                    color: "#9ca3af",
+                  }}
+                >
+                  Scores : équipe (0 & 2){" "}
+                  <strong>{gameState.scores.team0}</strong> pts — équipe (1 & 3){" "}
+                  <strong>{gameState.scores.team1}</strong> pts
+                </p>
+              )}
             </>
           )}
 
@@ -651,8 +688,8 @@ function App() {
             }}
           >
             Ouvre la même table dans plusieurs onglets/navigateurs, lance la
-            partie et joue des cartes à tour de rôle pour voir le pli se
-            construire en direct.
+            partie et joue tous les plis : à la fin, la partie passe en
+            “terminée” et les scores des deux équipes s&apos;affichent.
           </p>
         </section>
       </main>

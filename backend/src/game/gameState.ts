@@ -35,18 +35,27 @@ export interface GameState {
 /**
  * Crée un nouvel état de partie (une donne) :
  * - distribue les cartes
- * - phase mise directement à PlayingTricks (on ajoutera la phase atout plus tard)
- * - joueur suivant le donneur commence le jeu
+ * - choisit un atout aléatoire
+ * - phase = PlayingTricks (on fera la phase d'atout plus tard)
+ * - joueur suivant le donneur commence
  */
 export function startNewGame(dealer: PlayerId): GameState {
     const deal: DealState = dealCards(dealer);
     const firstPlayer: PlayerId = ((dealer + 1) % 4) as PlayerId;
 
+    const allSuits: Suit[] = [
+        Suit.Clubs,
+        Suit.Diamonds,
+        Suit.Hearts,
+        Suit.Spades,
+    ];
+    const trumpSuit = allSuits[Math.floor(Math.random() * allSuits.length)];
+
     return {
         phase: GamePhase.PlayingTricks,
         dealer: deal.dealer,
         currentPlayer: firstPlayer,
-        trumpSuit: deal.trumpSuit, // pour l'instant undefined
+        trumpSuit,
         hands: deal.hands,
         trick: null,
         scores: {
@@ -59,7 +68,6 @@ export function startNewGame(dealer: PlayerId): GameState {
 // ---------- Helpers pour déterminer le gagnant d'un pli ----------
 
 // Ordre de force des cartes (du plus faible au plus fort) pour la prise de pli
-// selon les règles de la belote (ordre des points).
 // Non-atout : 7 < 8 < 9 < J < Q < K < 10 < A
 // Atout    : 7 < 8 < Q < K < 10 < A < 9 < J
 
@@ -85,6 +93,29 @@ const TRUMP_ORDER: Rank[] = [
     Rank.Jack,
 ];
 
+// Valeurs de points (sans belote/rebelote pour l'instant)
+const NON_TRUMP_POINTS: Record<Rank, number> = {
+    [Rank.Seven]: 0,
+    [Rank.Eight]: 0,
+    [Rank.Nine]: 0,
+    [Rank.Jack]: 2,
+    [Rank.Queen]: 3,
+    [Rank.King]: 4,
+    [Rank.Ten]: 10,
+    [Rank.Ace]: 11,
+};
+
+const TRUMP_POINTS: Record<Rank, number> = {
+    [Rank.Seven]: 0,
+    [Rank.Eight]: 0,
+    [Rank.Nine]: 14,
+    [Rank.Jack]: 20,
+    [Rank.Queen]: 3,
+    [Rank.King]: 4,
+    [Rank.Ten]: 10,
+    [Rank.Ace]: 11,
+};
+
 function rankStrength(rank: Rank, trump: boolean): number {
     const order = trump ? TRUMP_ORDER : NON_TRUMP_ORDER;
     return order.indexOf(rank);
@@ -92,6 +123,18 @@ function rankStrength(rank: Rank, trump: boolean): number {
 
 function isTrump(card: Card, trumpSuit?: Suit): boolean {
     return trumpSuit !== undefined && card.suit === trumpSuit;
+}
+
+function cardPoints(card: Card, trumpSuit?: Suit): number {
+    const trump = isTrump(card, trumpSuit);
+    return trump ? TRUMP_POINTS[card.rank] : NON_TRUMP_POINTS[card.rank];
+}
+
+function trickPoints(trick: Trick, trumpSuit?: Suit): number {
+    return trick.cards.reduce(
+        (sum, tc) => sum + cardPoints(tc.card, trumpSuit),
+        0
+    );
 }
 
 /**
@@ -195,12 +238,9 @@ export function validatePlay(
     return null;
 }
 
-
 /**
  * Joue une carte pour un joueur donné.
- * On suppose que :
- * - la phase est PlayingTricks
- * - le tour appartient bien à ce joueur (vérifié plus haut)
+ * Supposé : validatePlay a été appelée avant.
  */
 export function playCard(state: GameState, player: PlayerId, card: Card): void {
     if (state.phase !== GamePhase.PlayingTricks) {
@@ -246,7 +286,21 @@ export function playCard(state: GameState, player: PlayerId, card: Card): void {
     state.trick.winner = winner;
     state.currentPlayer = winner as PlayerId;
 
-    // TODO plus tard :
-    // - attribuer les points du pli à l'équipe gagnante
-    // - vérifier si toutes les cartes ont été jouées pour passer en phase Finished
+    // Attribution des points du pli
+    const points = trickPoints(state.trick, state.trumpSuit);
+    const winnerTeam = winner === 0 || winner === 2 ? "team0" : "team1";
+    state.scores[winnerTeam] += points;
+
+    // Vérifier si toutes les cartes sont jouées (fin de donne)
+    const ALL_PLAYERS: PlayerId[] = [0, 1, 2, 3];
+
+    const allHandsEmpty = ALL_PLAYERS.every(
+        (pid) => state.hands[pid].length === 0
+    );
+
+    if (allHandsEmpty) {
+        // Bonus du dernier pli : 10 points
+        state.scores[winnerTeam] += 10;
+        state.phase = GamePhase.Finished;
+    }
 }

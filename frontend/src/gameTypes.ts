@@ -36,4 +36,8 @@ export interface GameStateWS {
     trumpSuit?: Suit;
     hands: Record<string, Card[]>;
     trick: TrickWS | null;
+    scores: {
+        team0: number;
+        team1: number;
+    };
 }
