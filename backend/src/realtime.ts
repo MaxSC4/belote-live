@@ -1,6 +1,14 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
-import { GameState, GamePhase, playCard, startNewGame } from "./game/gameState";
+
+import {
+    GameState,
+    GamePhase,
+    playCard,
+    startNewGame,
+    validatePlay,
+} from "./game/gameState";
+
 import { Card, PlayerId } from "./game/types";
 
 type ClientId = string;
@@ -297,6 +305,16 @@ function handleStartGameMessage(client: ClientInfo) {
         const error: ErrorMessage = {
         type: "error",
         payload: { message: "Ce n'est pas votre tour." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const validationError = validatePlay(state, client.seat, message.payload.card);
+    if (validationError) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: validationError },
         };
         send(client.ws, error);
         return;

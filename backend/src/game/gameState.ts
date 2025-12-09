@@ -152,6 +152,51 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
 }
 
 /**
+ * Valide si un joueur a le droit de jouer cette carte dans l'état actuel.
+ * Retourne:
+ *  - null si le coup est légal
+ *  - un message d'erreur sinon
+ */
+export function validatePlay(
+    state: GameState,
+    player: PlayerId,
+    card: Card
+): string | null {
+    if (state.phase !== GamePhase.PlayingTricks) {
+        return "On ne peut jouer une carte que pendant la phase des plis.";
+    }
+
+    const hand = state.hands[player];
+    if (!hand) {
+        return "Main introuvable pour ce joueur.";
+    }
+
+    const inHand = hand.some(
+        (c) => c.suit === card.suit && c.rank === card.rank
+    );
+    if (!inHand) {
+        return "Cette carte n'est pas dans votre main.";
+    }
+
+    // S'il n'y a pas encore de pli ou qu'on redémarre un pli, aucune contrainte
+    if (!state.trick || state.trick.cards.length === 0 || state.trick.cards.length === 4) {
+        return null;
+    }
+
+    // Couleur demandée = couleur de la première carte du pli
+    const leadSuit = state.trick.cards[0].card.suit;
+    const hasLeadSuit = hand.some((c) => c.suit === leadSuit);
+
+    if (hasLeadSuit && card.suit !== leadSuit) {
+        return "Vous devez fournir à la couleur.";
+    }
+
+    // Plus tard : ajouter les règles sur l'atout, couper, surcouper, etc.
+    return null;
+}
+
+
+/**
  * Joue une carte pour un joueur donné.
  * On suppose que :
  * - la phase est PlayingTricks
