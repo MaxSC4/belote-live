@@ -407,6 +407,13 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
  * Retourne:
  *  - null si le coup est légal
  *  - un message d'erreur sinon
+ *
+ * Règles de belote implémentées :
+ *  - on doit fournir à la couleur si possible
+ *  - si on ne peut pas fournir :
+ *      - on doit couper à l'atout si l'adversaire est maître et qu'on a de l'atout
+ *      - si un atout est déjà posé par un adversaire, on doit surcouper si possible
+ *      - si le partenaire est maître (avec ou sans atout), on peut se défausser
  */
 export function validatePlay(
     state: GameState,
@@ -438,17 +445,160 @@ export function validatePlay(
         return null;
     }
 
-    // Couleur demandée = couleur de la première carte du pli
-    const leadSuit = state.trick.cards[0].card.suit;
+    const trick = state.trick;
+    const trumpSuit = state.trumpSuit;
+
+    // Pas d'atout défini (sécurité / debug) -> on applique uniquement "fournir à la couleur"
+    const leadSuit = trick.cards[0].card.suit;
     const hasLeadSuit = hand.some((c) => c.suit === leadSuit);
 
-    if (hasLeadSuit && card.suit !== leadSuit) {
+    if (!trumpSuit) {
+        if (hasLeadSuit && card.suit !== leadSuit) {
+            return "Vous devez fournir à la couleur.";
+        }
+        return null;
+    }
+
+    const hasTrump = hand.some((c) => c.suit === trumpSuit);
+
+    const isTeam0 = (p: PlayerId) => p === 0 || p === 2;
+    const sameTeam = (a: PlayerId, b: PlayerId) =>
+        (isTeam0(a) && isTeam0(b)) || (!isTeam0(a) && !isTeam0(b));
+
+    // --- 1) Le joueur fournit la couleur demandée ---
+    if (card.suit === leadSuit) {
+        // Cas simple : couleur demandée ≠ atout
+        if (leadSuit !== trumpSuit) {
+            return null;
+        }
+
+        // Cas particulier : la couleur demandée est l'atout -> vérifier la surcoupe
+        const trumpCardsInTrick = trick.cards.filter(
+            (tc) => tc.card.suit === trumpSuit
+        );
+
+        if (trumpCardsInTrick.length === 0) {
+            // Premier atout joué dans le pli -> pas d'obligation de surcouper
+            return null;
+        }
+
+        // Atouts déjà présents dans le pli -> on peut être obligé de surcouper
+        const highestTrumpInTrick = trumpCardsInTrick.reduce((best, tc) =>
+            rankStrength(tc.card.rank, true) >
+            rankStrength(best.card.rank, true)
+                ? tc
+                : best
+        );
+
+        const currentWinner = computeTrickWinner(trick, trumpSuit);
+        const winnerIsPartner = sameTeam(currentWinner, player);
+
+        if (winnerIsPartner) {
+            // On n'est pas obligé de surcouper le partenaire
+            return null;
+        }
+
+        const highestStrength = rankStrength(
+            highestTrumpInTrick.card.rank,
+            true
+        );
+        const canOvertrump = hand.some(
+            (c) =>
+                c.suit === trumpSuit &&
+                rankStrength(c.rank, true) > highestStrength
+        );
+        const myStrength = rankStrength(card.rank, true);
+
+        if (canOvertrump && myStrength <= highestStrength) {
+            return "Vous devez surcouper à l'atout si possible.";
+        }
+
+        return null;
+    }
+
+    // --- 2) Le joueur NE fournit PAS la couleur demandée ---
+    if (hasLeadSuit) {
+        // Il possède de la couleur demandée mais ne la joue pas -> interdit
         return "Vous devez fournir à la couleur.";
     }
 
-    // Plus tard : ajouter les règles sur l'atout, couper, surcouper, etc.
+    // À partir d'ici, le joueur ne possède pas la couleur demandée
+    // -> on regarde l'atout
+    if (!hasTrump) {
+        // Pas d'atout -> défausse libre
+        return null;
+    }
+
+    // Il possède de l'atout
+    const trumpCardsInTrick = trick.cards.filter(
+        (tc) => tc.card.suit === trumpSuit
+    );
+    const anyTrumpInTrick = trumpCardsInTrick.length > 0;
+
+    const currentWinner = computeTrickWinner(trick, trumpSuit);
+    const winnerIsPartner = sameTeam(currentWinner, player);
+
+    // --- 2.a) Aucun atout encore joué dans le pli ---
+    if (!anyTrumpInTrick) {
+        if (winnerIsPartner) {
+            // Partenaire maître (sans atout) -> on peut se défausser
+            // Le joueur est autorisé à défausser OU couper volontairement
+            return null;
+        } else {
+            // Adversaire maître -> on doit couper
+            if (card.suit !== trumpSuit) {
+                return "Vous devez couper à l'atout.";
+            }
+            return null;
+        }
+    }
+
+    // --- 2.b) Au moins un atout déjà joué ---
+    const highestTrumpInTrick = trumpCardsInTrick.reduce((best, tc) =>
+        rankStrength(tc.card.rank, true) > rankStrength(best.card.rank, true)
+            ? tc
+            : best
+    );
+    const highestStrength = rankStrength(
+        highestTrumpInTrick.card.rank,
+        true
+    );
+    const highestIsPartner = sameTeam(highestTrumpInTrick.player, player);
+
+    if (highestIsPartner) {
+        // Le partenaire a déjà coupé et reste maître -> pas obligé de surcouper
+        // Le joueur peut se défausser même s'il a de l'atout
+        return null;
+    }
+
+    // Atout maître chez l'adversaire
+    const canOvertrump = hand.some(
+        (c) =>
+            c.suit === trumpSuit &&
+            rankStrength(c.rank, true) > highestStrength
+    );
+
+    if (canOvertrump) {
+        // On doit surcouper
+        if (card.suit !== trumpSuit) {
+            return "Vous devez surcouper à l'atout.";
+        }
+        const myStrength = rankStrength(card.rank, true);
+        if (myStrength <= highestStrength) {
+            return "Vous devez surcouper à l'atout avec un atout plus fort.";
+        }
+        return null;
+    }
+
+    // On ne peut pas surcouper mais on a de l'atout :
+    // -> on doit quand même mettre de l'atout plutôt que défausser
+    if (card.suit !== trumpSuit) {
+        return "Vous devez couper à l'atout si vous ne pouvez pas fournir.";
+    }
+
     return null;
 }
+
 
 /**
  * Joue une carte pour un joueur donné.

@@ -4,9 +4,11 @@ import { Server } from "http";
 import {
     GameState,
     GamePhase,
-    playCard,
     startNewGame,
+    chooseTrump,
+    ChooseTrumpPayload,
     validatePlay,
+    playCard,
 } from "./game/gameState";
 
 import { Card, PlayerId } from "./game/types";
@@ -83,7 +85,16 @@ interface ErrorMessage extends BaseMessage {
     };
 }
 
-type IncomingMessage = JoinRoomMessage | StartGameMessage | PlayCardMessage;
+interface ChooseTrumpMessage extends BaseMessage {
+    type: "choose_trump";
+    payload: ChooseTrumpPayload; // importé depuis gameState
+}
+
+type IncomingMessage =
+    | JoinRoomMessage
+    | StartGameMessage
+    | PlayCardMessage
+    | ChooseTrumpMessage;
 
 // --------- Utils envoi ---------
 
@@ -332,6 +343,43 @@ function handleStartGameMessage(client: ClientInfo) {
     }
 }
 
+function handleChooseTrumpMessage(client: ClientInfo, message: ChooseTrumpMessage) {
+    if (!client.roomCode) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const room = rooms.get(client.roomCode);
+    if (!room || !room.gameState) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Aucune partie en cours dans cette room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (client.seat === undefined) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'avez pas de siège assigné." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    // Appliquer la logique de prise
+    room.gameState = chooseTrump(room.gameState, client.seat, message.payload);
+
+    // Diffuser le nouvel état à tout le monde
+    broadcastGameState(room);
+}
+
+
 function handleClientDisconnect(clientId: ClientId) {
     const client = clients.get(clientId);
     if (!client) return;
@@ -392,21 +440,24 @@ export function setupWebSocketServer(httpServer: Server) {
 
         switch (parsed.type) {
             case "join_room":
-            handleJoinRoomMessage(client, parsed);
-            break;
+                handleJoinRoomMessage(client, parsed);
+                break;
             case "start_game":
-            handleStartGameMessage(client);
-            break;
+                handleStartGameMessage(client);
+                break;
             case "play_card":
-            handlePlayCardMessage(client, parsed);
-            break;
+                handlePlayCardMessage(client, parsed);
+                break;
+            case "choose_trump":
+                handleChooseTrumpMessage(client, parsed);
+                break;
             default: {
-            const msg: ErrorMessage = {
-                type: "error",
-                payload: { message: "Type de message inconnu." },
-            };
-            send(ws, msg);
-            break;
+                const msg: ErrorMessage = {
+                    type: "error",
+                    payload: { message: "Type de message inconnu." },
+                };
+                send(ws, msg);
+                break;
             }
         }
         });

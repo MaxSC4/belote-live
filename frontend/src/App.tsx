@@ -208,11 +208,6 @@ function App() {
   const mySeat =
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
-  const fullHand: Card[] =
-    gameState && mySeat !== null
-      ? gameState.hands[String(mySeat)] || []
-      : [];
-
   const isMyTurn =
     gameState &&
     mySeat !== null &&
