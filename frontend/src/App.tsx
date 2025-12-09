@@ -54,6 +54,21 @@ const GLOBAL_STYLES = `
   from { transform: translateX(12px) scale(0.9); opacity: 0; }
   to   { transform: translateX(0) scale(1); opacity: 1; }
 }
+@keyframes trick-winner-banner {
+  0%   { transform: translateY(-10px) scale(0.95); opacity: 0; }
+  20%  { transform: translateY(0) scale(1); opacity: 1; }
+  80%  { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-8px) scale(0.95); opacity: 0; }
+}
+@keyframes final-score-pop {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes backdrop-fade {
+  from { opacity: 0; }
+  to   { opacity: 0.75; }
+}
 `;
 
 function App() {
@@ -74,6 +89,11 @@ function App() {
   const [gameState, setGameState] = useState<GameStateWS | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Animations : bannière gagnant de pli + overlay fin de donne
+  const [showTrickWinnerBanner, setShowTrickWinnerBanner] = useState(false);
+  const [showEndOverlay, setShowEndOverlay] = useState(false);
+  const prevPhaseRef = useRef<string | null>(null);
 
   // Injecter les keyframes une fois
   useEffect(() => {
@@ -229,6 +249,7 @@ function App() {
   const currentPhase = gameState?.phase ?? "—";
   const trumpSymbol = gameState?.trumpSuit ?? "—";
 
+  // Mappage 0–3 vers positions de table, en gardant "moi" en bas
   function seatToTablePosition(seat: number | null): TablePosition | null {
     if (seat === null) return null;
     if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
@@ -244,14 +265,43 @@ function App() {
     playersByPosition[pos] = player;
   });
 
+  // Pour l'affichage : J1–J4
   function playerNameForSeat(seat: number): string {
     const player = roomPlayers.find((p) => p.seat === seat);
-    return player?.nickname ?? `J${seat}`;
+    const label = `J${seat + 1}`;
+    return player?.nickname ? `${player.nickname} (${label})` : label;
+  }
+
+  function shortSeatLabel(seat: number): string {
+    return `J${seat + 1}`;
   }
 
   function cardPositionForPlayerSeat(seat: number): TablePosition {
     return seatToTablePosition(seat) ?? "top";
   }
+
+  // ---- Animations : gagnant de pli & fin de donne ----
+
+  // Bannière "Pli pour ..."
+  useEffect(() => {
+    if (!gameState || !gameState.trick) return;
+    if (gameState.trick.winner === undefined) return;
+
+    setShowTrickWinnerBanner(true);
+    const timer = setTimeout(() => setShowTrickWinnerBanner(false), 1800);
+    return () => clearTimeout(timer);
+  }, [gameState?.trick?.winner]);
+
+  // Overlay de score final quand on passe à Finished
+  useEffect(() => {
+    const phase = gameState?.phase;
+    const prev = prevPhaseRef.current;
+
+    if (phase === "Finished" && prev && prev !== "Finished") {
+      setShowEndOverlay(true);
+    }
+    prevPhaseRef.current = phase ?? null;
+  }, [gameState?.phase]);
 
   // ---------- LOBBY ----------
 
@@ -281,13 +331,30 @@ function App() {
             border: "1px solid rgba(148,163,184,0.3)",
           }}
         >
-          <h1 style={{ fontSize: "1.8rem", marginBottom: "0.5rem" }}>
+          <h1 style={{ fontSize: "1.9rem", marginBottom: "0.25rem" }}>
             belote-live
           </h1>
-          <p style={{ marginBottom: "1.5rem", color: "#9ca3af" }}>
-            Jouez à la belote en ligne entre collègues. 4 joueurs, une table,
-            des atouts 🎴
+          <p style={{ margin: 0, color: "#9ca3af", fontSize: "0.9rem" }}>
+            Belote en ligne entre collègues, temps réel, 4 joueurs.
           </p>
+
+          <div
+            style={{
+              marginTop: "1.5rem",
+              marginBottom: "1.25rem",
+              padding: "0.5rem 0.75rem",
+              borderRadius: "0.75rem",
+              background:
+                "linear-gradient(120deg, rgba(15,23,42,0.9), rgba(22,101,52,0.3))",
+              border: "1px solid rgba(34,197,94,0.35)",
+              fontSize: "0.8rem",
+              color: "#bbf7d0",
+            }}
+          >
+            <span style={{ marginRight: "0.4rem" }}>🃏</span>
+            Créez un code de table, partagez-le à 3 collègues et lancez la
+            partie.
+          </div>
 
           <button
             type="button"
@@ -326,7 +393,7 @@ function App() {
                 id="nickname"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                placeholder="Ex : Claire, Toto, JJ..."
+                placeholder="Ex : Max, Claire..."
                 style={{
                   width: "100%",
                   padding: "0.5rem 0.75rem",
@@ -386,17 +453,6 @@ function App() {
               Rejoindre la table
             </button>
           </form>
-
-          <p
-            style={{
-              marginTop: "1.25rem",
-              fontSize: "0.8rem",
-              color: "#6b7280",
-            }}
-          >
-            Ensuite : jouez vos cartes en temps réel, puis on ajoute les règles
-            avancées et la contrée 💥
-          </p>
         </div>
       </div>
     );
@@ -426,16 +482,36 @@ function App() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingBottom: "0.4rem",
+          paddingBottom: "0.6rem",
+          borderBottom: "1px solid rgba(15,23,42,0.9)",
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: "1.3rem" }}>Table {roomCode}</h1>
-          <p style={{ margin: 0, fontSize: "0.9rem", color: "#9ca3af" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <h1 style={{ margin: 0, fontSize: "1.4rem" }}>Table {roomCode}</h1>
+            <span
+              style={{
+                padding: "0.1rem 0.5rem",
+                borderRadius: "9999px",
+                border: "1px solid rgba(148,163,184,0.5)",
+                fontSize: "0.7rem",
+                color: "#9ca3af",
+              }}
+            >
+              4 joueurs · belote classique
+            </span>
+          </div>
+          <p style={{ margin: "0.25rem 0 0", fontSize: "0.9rem" }}>
             Connecté en tant que <strong>{nickname}</strong>
-            {mySeat !== null && ` (siège ${mySeat})`}
+            {mySeat !== null && ` (${shortSeatLabel(mySeat)})`}
           </p>
-          <p style={{ margin: 0, fontSize: "0.8rem", color: "#6b7280" }}>
+          <p
+            style={{
+              margin: "0.1rem 0 0",
+              fontSize: "0.8rem",
+              color: "#6b7280",
+            }}
+          >
             WebSocket :{" "}
             {wsStatus === "connected"
               ? "connecté ✅"
@@ -444,7 +520,13 @@ function App() {
               : "déconnecté ❌"}
           </p>
           {gameState && (
-            <p style={{ margin: 0, fontSize: "0.8rem", color: "#9ca3af" }}>
+            <p
+              style={{
+                margin: "0.1rem 0 0",
+                fontSize: "0.8rem",
+                color: "#9ca3af",
+              }}
+            >
               Atout :{" "}
               <strong
                 style={{
@@ -467,7 +549,7 @@ function App() {
             onClick={handleStartGame}
             disabled={wsStatus !== "connected"}
             style={{
-              padding: "0.4rem 0.75rem",
+              padding: "0.4rem 0.9rem",
               borderRadius: "9999px",
               border: "none",
               background:
@@ -486,7 +568,7 @@ function App() {
             type="button"
             onClick={() => setView("lobby")}
             style={{
-              padding: "0.4rem 0.75rem",
+              padding: "0.4rem 0.9rem",
               borderRadius: "9999px",
               border: "1px solid rgba(148,163,184,0.6)",
               background: "transparent",
@@ -500,7 +582,7 @@ function App() {
         </div>
       </header>
 
-      {/* ZONE PRINCIPALE : tapis plein écran + sidebar en overlay */}
+      {/* ZONE PRINCIPALE */}
       <main
         style={{
           flex: 1,
@@ -524,6 +606,34 @@ function App() {
             padding: "0.5rem 0.75rem 0.6rem",
           }}
         >
+          {/* Bannière gagnant du pli */}
+          {showTrickWinnerBanner &&
+            gameState &&
+            gameState.trick &&
+            gameState.trick.winner !== undefined && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "0.7rem",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  padding: "0.35rem 0.8rem",
+                  borderRadius: "9999px",
+                  background:
+                    "linear-gradient(120deg, rgba(22,163,74,0.9), rgba(21,128,61,0.8))",
+                  border: "1px solid rgba(34,197,94,0.9)",
+                  fontSize: "0.8rem",
+                  boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
+                  animation: "trick-winner-banner 1.8s ease-out",
+                }}
+              >
+                💥 Pli pour{" "}
+                <strong>
+                  {playerNameForSeat(gameState.trick.winner)}
+                </strong>
+              </div>
+            )}
+
           {/* JOUEURS + PLI AU CENTRE */}
           <div
             style={{
@@ -596,7 +706,7 @@ function App() {
                       key={`${tc.player}-${idx}`}
                       position={pos}
                       card={tc.card}
-                      playerLabel={playerNameForSeat(tc.player)}
+                      playerLabel={shortSeatLabel(tc.player)}
                     />
                   );
                 })}
@@ -639,7 +749,7 @@ function App() {
               )}
               {gameState && gameState.phase === "Finished" && (
                 <span style={{ color: "#facc15", marginLeft: "0.4rem" }}>
-                  — partie terminée
+                  — donne terminée
                 </span>
               )}
             </p>
@@ -776,7 +886,8 @@ function App() {
                       {isYou && (
                         <span style={{ color: "#a5b4fc" }}> (vous)</span>
                       )}
-                      {player.seat !== null && ` — siège ${player.seat}`}
+                      {player.seat !== null &&
+                        ` — ${shortSeatLabel(player.seat)}`}
                     </span>
                     {isCurrent && (
                       <span
@@ -829,7 +940,7 @@ function App() {
                   color: "#e5e7eb",
                 }}
               >
-                Équipe (0 &amp; 2) :{" "}
+                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
                 <strong>{gameState.scores.team0}</strong> pts
               </p>
               <p
@@ -839,22 +950,10 @@ function App() {
                   color: "#e5e7eb",
                 }}
               >
-                Équipe (1 &amp; 3) :{" "}
+                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
                 <strong>{gameState.scores.team1}</strong> pts
               </p>
             </div>
-          )}
-
-          {gameState && gameState.trick && gameState.trick.winner !== undefined && (
-            <p
-              style={{
-                marginTop: "0.25rem",
-                fontSize: "0.8rem",
-                color: "#9ca3af",
-              }}
-            >
-              Dernier pli : <strong>J{gameState.trick.winner}</strong>
-            </p>
           )}
 
           {wsError && (
@@ -873,6 +972,90 @@ function App() {
             </div>
           )}
         </aside>
+
+        {/* OVERLAY SCORE FINAL */}
+        {showEndOverlay && gameState && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 50,
+            }}
+            onClick={() => setShowEndOverlay(false)}
+          >
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "rgba(15,23,42,0.85)",
+                animation: "backdrop-fade 0.25s ease-out",
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                padding: "1.4rem 2rem",
+                borderRadius: "1.2rem",
+                background:
+                  "radial-gradient(circle at top, #0f172a 0, #020617 60%)",
+                border: "1px solid rgba(148,163,184,0.7)",
+                boxShadow: "0 25px 60px -24px rgba(0,0,0,1)",
+                maxWidth: "90%",
+                textAlign: "center",
+                animation: "final-score-pop 0.3s ease-out",
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  marginBottom: "0.4rem",
+                  fontSize: "1.1rem",
+                }}
+              >
+                🎉 Donne terminée
+              </h2>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.9rem",
+                  color: "#e5e7eb",
+                }}
+              >
+                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
+                <strong>{gameState.scores.team0}</strong> pts
+              </p>
+              <p
+                style={{
+                  margin: "0.1rem 0 0.6rem",
+                  fontSize: "0.9rem",
+                  color: "#e5e7eb",
+                }}
+              >
+                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
+                <strong>{gameState.scores.team1}</strong> pts
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowEndOverlay(false)}
+                style={{
+                  marginTop: "0.3rem",
+                  padding: "0.35rem 0.9rem",
+                  borderRadius: "9999px",
+                  border: "1px solid rgba(148,163,184,0.7)",
+                  background: "rgba(15,23,42,0.95)",
+                  color: "#e5e7eb",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -904,12 +1087,15 @@ function SeatBanner(props: {
       >
         {position === "bottom"
           ? "En attente de vous..."
-          : "En attente d'un joueur..."}
+          : "En attente d&apos;un joueur..."}
       </div>
     );
   }
 
-  const label = isSelf ? `${player.nickname} (vous)` : player.nickname;
+  const seatLabel = `J${(player.seat ?? 0) + 1}`;
+  const label = isSelf
+    ? `${player.nickname} (${seatLabel}, vous)`
+    : `${player.nickname} (${seatLabel})`;
 
   return (
     <div
