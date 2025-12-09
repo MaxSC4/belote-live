@@ -1,5 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
+import { GameState, GamePhase, startNewGame } from "./game/gameState";
+import { PlayerId } from "./game/types";
 
 type ClientId = string;
 
@@ -8,12 +10,15 @@ interface ClientInfo {
     ws: WebSocket;
     nickname: string;
     roomCode?: string;
+    seat?: PlayerId; // 0..3
 }
 
 interface Room {
     code: string;
     clients: Set<ClientId>;
     createdAt: number;
+    seats: (ClientId | null)[]; // index = seat (0..3)
+    gameState?: GameState;
 }
 
 const clients = new Map<ClientId, ClientInfo>();
@@ -22,6 +27,8 @@ const rooms = new Map<string, Room>();
 function generateClientId(): ClientId {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+// --------- Messages ---------
 
 interface BaseMessage {
     type: string;
@@ -35,11 +42,22 @@ interface JoinRoomMessage extends BaseMessage {
     };
 }
 
+interface StartGameMessage extends BaseMessage {
+    type: "start_game";
+}
+
 interface RoomUpdateMessage extends BaseMessage {
     type: "room_update";
     payload: {
         roomCode: string;
-        players: { id: ClientId; nickname: string }[];
+        players: { id: ClientId; nickname: string; seat: PlayerId | null }[];
+    };
+}
+
+interface GameStateMessage extends BaseMessage {
+    type: "game_state";
+    payload: {
+        state: GameState;
     };
 }
 
@@ -50,7 +68,9 @@ interface ErrorMessage extends BaseMessage {
     };
 }
 
-type IncomingMessage = JoinRoomMessage; // pour l’instant
+type IncomingMessage = JoinRoomMessage | StartGameMessage;
+
+// --------- Utils envoi ---------
 
 function send(ws: WebSocket, message: BaseMessage) {
     ws.send(JSON.stringify(message));
@@ -66,6 +86,7 @@ function broadcastRoomUpdate(roomCode: string) {
         .map((c) => ({
         id: c.id,
         nickname: c.nickname,
+        seat: c.seat ?? null,
         }));
 
     const payload: RoomUpdateMessage = {
@@ -84,6 +105,27 @@ function broadcastRoomUpdate(roomCode: string) {
         }
     }
 }
+
+function broadcastGameState(room: Room) {
+    if (!room.gameState) return;
+
+    const message: GameStateMessage = {
+        type: "game_state",
+        payload: {
+        state: room.gameState,
+        },
+    };
+
+    for (const clientId of room.clients) {
+        const client = clients.get(clientId);
+        if (!client) continue;
+        if (client.ws.readyState === WebSocket.OPEN) {
+        send(client.ws, message);
+        }
+    }
+}
+
+// --------- Handlers ---------
 
 function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
     const roomCode = message.payload.roomCode.trim().toUpperCase();
@@ -104,6 +146,7 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
         code: roomCode,
         clients: new Set(),
         createdAt: Date.now(),
+        seats: [null, null, null, null],
         };
         rooms.set(roomCode, room);
     }
@@ -117,11 +160,18 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
         return;
     }
 
-    // Si le client était déjà dans une autre room, on le retire
+    // Retirer de l'ancienne room si besoin
     if (client.roomCode && client.roomCode !== roomCode) {
         const oldRoom = rooms.get(client.roomCode);
         if (oldRoom) {
         oldRoom.clients.delete(client.id);
+        if (client.seat !== undefined) {
+            const seatIndex = client.seat;
+            if (oldRoom.seats[seatIndex] === client.id) {
+            oldRoom.seats[seatIndex] = null;
+            }
+        }
+
         if (oldRoom.clients.size === 0) {
             rooms.delete(oldRoom.code);
         } else {
@@ -132,9 +182,68 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
 
     client.nickname = nickname;
     client.roomCode = roomCode;
-    room.clients.add(client.id);
 
+    // Assigner un siège s'il n'en a pas déjà
+    if (client.seat === undefined) {
+        let assignedSeat: PlayerId | undefined;
+        for (let i = 0; i < 4; i++) {
+        if (room.seats[i] === null || room.seats[i] === client.id) {
+            assignedSeat = i as PlayerId;
+            room.seats[i] = client.id;
+            break;
+        }
+        }
+
+        if (assignedSeat === undefined) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Impossible d'assigner un siège à ce joueur." },
+        };
+        send(client.ws, error);
+        return;
+        }
+
+        client.seat = assignedSeat;
+    }
+
+    room.clients.add(client.id);
     broadcastRoomUpdate(roomCode);
+}
+
+function handleStartGameMessage(client: ClientInfo) {
+    if (!client.roomCode) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const room = rooms.get(client.roomCode);
+    if (!room) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Room introuvable côté serveur." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (room.clients.size !== 4) {
+        const error: ErrorMessage = {
+        type: "error",
+        payload: { message: "Il faut 4 joueurs pour lancer la partie." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    // Pour l'instant, donneur fixe = siège 0
+    const dealer: PlayerId = 0;
+    room.gameState = startNewGame(dealer);
+
+    broadcastGameState(room);
 }
 
 function handleClientDisconnect(clientId: ClientId) {
@@ -145,6 +254,14 @@ function handleClientDisconnect(clientId: ClientId) {
         const room = rooms.get(client.roomCode);
         if (room) {
         room.clients.delete(clientId);
+
+        if (client.seat !== undefined) {
+            const seatIndex = client.seat;
+            if (room.seats[seatIndex] === clientId) {
+            room.seats[seatIndex] = null;
+            }
+        }
+
         if (room.clients.size === 0) {
             rooms.delete(room.code);
         } else {
@@ -155,6 +272,8 @@ function handleClientDisconnect(clientId: ClientId) {
 
     clients.delete(clientId);
 }
+
+// --------- Setup WebSocket ---------
 
 export function setupWebSocketServer(httpServer: Server) {
     const wss = new WebSocketServer({
@@ -176,7 +295,7 @@ export function setupWebSocketServer(httpServer: Server) {
         let parsed: IncomingMessage;
         try {
             parsed = JSON.parse(data.toString());
-        } catch (error) {
+        } catch {
             const msg: ErrorMessage = {
             type: "error",
             payload: { message: "Message JSON invalide." },
@@ -187,10 +306,12 @@ export function setupWebSocketServer(httpServer: Server) {
 
         if (parsed.type === "join_room") {
             handleJoinRoomMessage(client, parsed);
+        } else if (parsed.type === "start_game") {
+            handleStartGameMessage(client);
         } else {
             const msg: ErrorMessage = {
-            type: "error",
-            payload: { message: `Type de message inconnu: ${parsed.type}` },
+                type: "error",
+                payload: { message: `Type de message inconnu` },
             };
             send(ws, msg);
         }

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { config } from "./config";
-import type { Card, DealResponse } from "./gameTypes";
+import type { Card, DealResponse, GameStateWS } from "./gameTypes";
 
 type View = "lobby" | "game";
 
 interface RoomPlayer {
   id: string;
   nickname: string;
+  seat: number | null;
 }
 
 type RoomUpdateMessage = {
@@ -24,6 +25,13 @@ type ErrorMessage = {
   };
 };
 
+type GameStateMessage = {
+  type: "game_state";
+  payload: {
+    state: GameStateWS;
+  };
+};
+
 function App() {
   const [view, setView] = useState<View>("lobby");
   const [nickname, setNickname] = useState("");
@@ -36,6 +44,8 @@ function App() {
   const [wsStatus, setWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [roomPlayers, setRoomPlayers] = useState<RoomPlayer[]>([]);
   const [wsError, setWsError] = useState<string | null>(null);
+
+  const [gameState, setGameState] = useState<GameStateWS | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -50,7 +60,7 @@ function App() {
     setRoomCode(generatedCode);
   };
 
-  // Récupérer une donne au passage en vue "game"
+  // Fetch HTTP debug pour avoir une donne (on la gardera comme fallback)
   useEffect(() => {
     if (view !== "game") return;
 
@@ -78,10 +88,9 @@ function App() {
     fetchDeal();
   }, [view]);
 
-  // Gestion WebSocket : connexion / join_room / updates
+  // WebSocket : connexion + join_room + réception des updates
   useEffect(() => {
     if (view !== "game") {
-      // On ferme la connexion si on quitte la table
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
@@ -89,6 +98,7 @@ function App() {
       setWsStatus("disconnected");
       setRoomPlayers([]);
       setWsError(null);
+      setGameState(null);
       return;
     }
 
@@ -101,7 +111,6 @@ function App() {
     ws.onopen = () => {
       setWsStatus("connected");
 
-      // On envoie join_room dès l'ouverture
       const message = {
         type: "join_room",
         payload: {
@@ -114,7 +123,10 @@ function App() {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as RoomUpdateMessage | ErrorMessage;
+        const data = JSON.parse(event.data) as
+          | RoomUpdateMessage
+          | ErrorMessage
+          | GameStateMessage;
 
         if (data.type === "room_update") {
           if (data.payload.roomCode === roomCode) {
@@ -122,6 +134,8 @@ function App() {
           }
         } else if (data.type === "error") {
           setWsError(data.payload.message);
+        } else if (data.type === "game_state") {
+          setGameState(data.payload.state);
         }
       } catch (error) {
         console.error("Message WS invalide", error);
@@ -141,6 +155,22 @@ function App() {
       ws.close();
     };
   }, [view, roomCode, nickname]);
+
+  const handleStartGame = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const message = {
+      type: "start_game",
+    };
+    wsRef.current.send(JSON.stringify(message));
+  };
+
+  // Main à afficher :
+  // - si on a un GameState, on affiche la main du joueur 0 (DEBUG)
+  // - sinon, on utilise la main reçue par HTTP (debug / fallback)
+  const effectiveHand: Card[] =
+    gameState && gameState.hands["0"]
+      ? gameState.hands["0"]
+      : hand;
 
   // ---------- VUE LOBBY ----------
 
@@ -277,8 +307,7 @@ function App() {
               color: "#6b7280",
             }}
           >
-            Prochaines étapes : connexion en temps réel, affichage des cartes, scores,
-            puis mode contrée 🔜
+            Prochaines étapes : atout, plis, scores… puis belote contrée 🔜
           </p>
         </div>
       </div>
@@ -319,20 +348,43 @@ function App() {
               : "déconnecté ❌"}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setView("lobby")}
-          style={{
-            padding: "0.4rem 0.75rem",
-            borderRadius: "0.5rem",
-            border: "1px solid rgba(148,163,184,0.6)",
-            background: "transparent",
-            color: "#e5e7eb",
-            cursor: "pointer",
-          }}
-        >
-          Quitter la table
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            type="button"
+            onClick={handleStartGame}
+            disabled={wsStatus !== "connected"}
+            style={{
+              padding: "0.4rem 0.75rem",
+              borderRadius: "0.5rem",
+              border: "none",
+              background:
+                wsStatus === "connected"
+                  ? "linear-gradient(135deg, #22c55e, #16a34a)"
+                  : "rgba(55,65,81,0.8)",
+              color: "#f9fafb",
+              cursor: wsStatus === "connected" ? "pointer" : "not-allowed",
+              fontSize: "0.85rem",
+            }}
+          >
+            Lancer la partie
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setView("lobby")}
+            style={{
+              padding: "0.4rem 0.75rem",
+              borderRadius: "0.5rem",
+              border: "1px solid rgba(148,163,184,0.6)",
+              background: "transparent",
+              color: "#e5e7eb",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+            }}
+          >
+            Quitter la table
+          </button>
+        </div>
       </header>
 
       <main
@@ -368,7 +420,7 @@ function App() {
                 marginTop: "0.5rem",
               }}
             >
-              {hand.map((card, index) => (
+              {effectiveHand.map((card, index) => (
                 <div
                   key={`${card.rank}-${card.suit}-${index}`}
                   style={{
@@ -399,6 +451,33 @@ function App() {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {gameState && (
+            <div
+              style={{
+                marginTop: "1rem",
+                paddingTop: "0.75rem",
+                borderTop: "1px solid rgba(55,65,81,0.8)",
+                fontSize: "0.85rem",
+                color: "#9ca3af",
+              }}
+            >
+              <p style={{ margin: 0 }}>
+                Phase : <strong>{gameState.phase}</strong>
+              </p>
+              <p style={{ margin: 0 }}>
+                Donneur : <strong>Joueur {gameState.dealer}</strong>
+              </p>
+              <p style={{ margin: 0 }}>
+                Joueur courant : <strong>Joueur {gameState.currentPlayer}</strong>
+              </p>
+              {gameState.trumpSuit && (
+                <p style={{ margin: 0 }}>
+                  Atout : <strong>{gameState.trumpSuit}</strong>
+                </p>
+              )}
             </div>
           )}
         </section>
@@ -440,7 +519,10 @@ function App() {
                   alignItems: "center",
                 }}
               >
-                <span>{player.nickname}</span>
+                <span>
+                  {player.nickname}
+                  {player.seat !== null && ` (Siège ${player.seat})`}
+                </span>
                 <span
                   style={{
                     fontSize: "0.75rem",
@@ -460,9 +542,9 @@ function App() {
               color: "#6b7280",
             }}
           >
-            Ouvre la même URL dans un autre onglet / navigateur, entre le même
-            code de table et un autre pseudo : tu verras la liste des joueurs
-            se synchroniser en direct.
+            Rejoins la même table dans d&apos;autres onglets/navigateurs pour
+            voir la liste des joueurs se synchroniser en direct, puis clique sur
+            “Lancer la partie”.
           </p>
         </section>
       </main>
