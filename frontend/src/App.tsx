@@ -32,6 +32,30 @@ type GameStateMessage = {
   };
 };
 
+type TablePosition = "bottom" | "top" | "left" | "right";
+
+const TABLE_POSITIONS: TablePosition[] = ["bottom", "left", "top", "right"];
+
+// Styles globaux pour les animations
+const GLOBAL_STYLES = `
+@keyframes trick-from-top {
+  from { transform: translateY(-12px) scale(0.9); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+@keyframes trick-from-bottom {
+  from { transform: translateY(12px) scale(0.9); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+@keyframes trick-from-left {
+  from { transform: translateX(-12px) scale(0.9); opacity: 0; }
+  to   { transform: translateX(0) scale(1); opacity: 1; }
+}
+@keyframes trick-from-right {
+  from { transform: translateX(12px) scale(0.9); opacity: 0; }
+  to   { transform: translateX(0) scale(1); opacity: 1; }
+}
+`;
+
 function App() {
   const [view, setView] = useState<View>("lobby");
   const [nickname, setNickname] = useState("");
@@ -41,13 +65,27 @@ function App() {
   const [isLoadingHand, setIsLoadingHand] = useState(false);
   const [handError, setHandError] = useState<string | null>(null);
 
-  const [wsStatus, setWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [wsStatus, setWsStatus] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
   const [roomPlayers, setRoomPlayers] = useState<RoomPlayer[]>([]);
   const [wsError, setWsError] = useState<string | null>(null);
 
   const [gameState, setGameState] = useState<GameStateWS | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Injecter les keyframes une fois
+  useEffect(() => {
+    const styleEl = document.createElement("style");
+    styleEl.innerHTML = GLOBAL_STYLES;
+    document.head.appendChild(styleEl);
+    return () => {
+      document.head.removeChild(styleEl);
+    };
+  }, []);
+
+  // ---- LOBBY ----
 
   const handleJoin = (event: React.FormEvent) => {
     event.preventDefault();
@@ -56,11 +94,12 @@ function App() {
   };
 
   const handleCreateRoom = () => {
-    const generatedCode = "TABLE42"; // plus tard : backend
-    setRoomCode(generatedCode);
+    const randomCode = `TABLE${Math.floor(Math.random() * 90 + 10)}`;
+    setRoomCode(randomCode);
   };
 
-  // Fetch HTTP debug pour une donne (fallback)
+  // ---- HTTP DEBUG DEAL (fallback) ----
+
   useEffect(() => {
     if (view !== "game") return;
 
@@ -88,7 +127,8 @@ function App() {
     fetchDeal();
   }, [view]);
 
-  // WebSocket : connexion + join_room + réception des updates
+  // ---- WEBSOCKET ----
+
   useEffect(() => {
     if (view !== "game") {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -110,15 +150,12 @@ function App() {
 
     ws.onopen = () => {
       setWsStatus("connected");
-
-      const message = {
-        type: "join_room",
-        payload: {
-          roomCode,
-          nickname,
-        },
-      };
-      ws.send(JSON.stringify(message));
+      ws.send(
+        JSON.stringify({
+          type: "join_room",
+          payload: { roomCode, nickname },
+        })
+      );
     };
 
     ws.onmessage = (event) => {
@@ -158,54 +195,79 @@ function App() {
 
   const handleStartGame = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const message = {
-      type: "start_game",
-    };
-    wsRef.current.send(JSON.stringify(message));
+    wsRef.current.send(JSON.stringify({ type: "start_game" }));
   };
 
-  // Déterminer mon siège (approximation : via nickname)
+  // ---- INFOS JOUEURS / TABLE ----
+
   const mySeat =
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
-  // Main affichée :
   const effectiveHand: Card[] =
     gameState && mySeat !== null
       ? gameState.hands[String(mySeat)] || []
       : hand;
 
   const isMyTurn =
-    gameState && mySeat !== null && gameState.currentPlayer === mySeat;
+    gameState &&
+    mySeat !== null &&
+    gameState.currentPlayer === mySeat &&
+    gameState.phase === "PlayingTricks";
 
   const handlePlayCard = (card: Card) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!gameState || mySeat === null) return;
-    if (!isMyTurn) return;
+    if (!gameState || mySeat === null || !isMyTurn) return;
 
-    const message = {
-      type: "play_card",
-      payload: {
-        card,
-      },
-    };
-    wsRef.current.send(JSON.stringify(message));
+    wsRef.current.send(
+      JSON.stringify({
+        type: "play_card",
+        payload: { card },
+      })
+    );
   };
 
   const currentPhase = gameState?.phase ?? "—";
+  const trumpSymbol = gameState?.trumpSuit ?? "—";
 
-  // ---------- VUE LOBBY ----------
+  function seatToTablePosition(seat: number | null): TablePosition | null {
+    if (seat === null) return null;
+    if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
+    const relativeIndex = (seat - mySeat + 4) % 4;
+    return TABLE_POSITIONS[relativeIndex] ?? null;
+  }
+
+  const playersByPosition: Partial<Record<TablePosition, RoomPlayer>> = {};
+  roomPlayers.forEach((player) => {
+    if (player.seat === null) return;
+    const pos = seatToTablePosition(player.seat);
+    if (!pos) return;
+    playersByPosition[pos] = player;
+  });
+
+  function playerNameForSeat(seat: number): string {
+    const player = roomPlayers.find((p) => p.seat === seat);
+    return player?.nickname ?? `J${seat}`;
+  }
+
+  function cardPositionForPlayerSeat(seat: number): TablePosition {
+    return seatToTablePosition(seat) ?? "top";
+  }
+
+  // ---------- LOBBY ----------
 
   if (view === "lobby") {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          height: "100vh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#0f172a",
+          background:
+            "radial-gradient(circle at top, #1d283a 0, #020617 55%, #000 100%)",
           color: "#e5e7eb",
-          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+          fontFamily:
+            "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
         }}
       >
         <div
@@ -214,7 +276,7 @@ function App() {
             maxWidth: 480,
             padding: "2rem",
             borderRadius: "1.5rem",
-            background: "rgba(15,23,42,0.9)",
+            background: "rgba(15,23,42,0.92)",
             boxShadow: "0 25px 50px -12px rgba(0,0,0,0.75)",
             border: "1px solid rgba(148,163,184,0.3)",
           }}
@@ -235,13 +297,14 @@ function App() {
               padding: "0.5rem 0.75rem",
               borderRadius: "9999px",
               border: "1px solid rgba(94,234,212,0.3)",
-              background: "rgba(15,23,42,0.5)",
+              background:
+                "linear-gradient(120deg, rgba(45,212,191,0.18), rgba(56,189,248,0.08))",
               color: "#5eead4",
               fontSize: "0.85rem",
               cursor: "pointer",
             }}
           >
-            Générer un code de table
+            Générer un code de table aléatoire
           </button>
 
           <form
@@ -269,8 +332,9 @@ function App() {
                   padding: "0.5rem 0.75rem",
                   borderRadius: "0.75rem",
                   border: "1px solid rgba(148,163,184,0.6)",
-                  background: "rgba(15,23,42,0.6)",
+                  background: "rgba(15,23,42,0.9)",
                   color: "#e5e7eb",
+                  outline: "none",
                 }}
               />
             </div>
@@ -296,10 +360,11 @@ function App() {
                   padding: "0.5rem 0.75rem",
                   borderRadius: "0.75rem",
                   border: "1px solid rgba(148,163,184,0.6)",
-                  background: "rgba(15,23,42,0.6)",
+                  background: "rgba(15,23,42,0.9)",
                   color: "#e5e7eb",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
+                  outline: "none",
                 }}
               />
             </div>
@@ -311,7 +376,8 @@ function App() {
                 padding: "0.6rem 0.75rem",
                 borderRadius: "0.75rem",
                 border: "none",
-                background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                background:
+                  "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
                 color: "#f9fafb",
                 fontWeight: 600,
                 cursor: "pointer",
@@ -328,37 +394,43 @@ function App() {
               color: "#6b7280",
             }}
           >
-            Prochaines étapes : atout, plis, scores… puis belote contrée 🔜
+            Ensuite : jouez vos cartes en temps réel, puis on ajoute les règles
+            avancées et la contrée 💥
           </p>
         </div>
       </div>
     );
   }
 
-  // ---------- VUE JEU ----------
-
-  const trumpSymbol = gameState?.trumpSuit ?? "—";
+  // ---------- JEU ----------
 
   return (
     <div
       style={{
-        minHeight: "100vh",
-        background: "#0b1120",
+        height: "100vh",
+        background:
+          "radial-gradient(circle at top, #1f2937 0, #020617 50%, #000 100%)",
         color: "#e5e7eb",
-        padding: "1rem",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        padding: "0.75rem",
+        fontFamily:
+          "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
       }}
     >
+      {/* HEADER */}
       <header
         style={{
+          flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: "1rem",
+          paddingBottom: "0.4rem",
         }}
       >
         <div>
-          <h1 style={{ margin: 0 }}>Table {roomCode}</h1>
+          <h1 style={{ margin: 0, fontSize: "1.3rem" }}>Table {roomCode}</h1>
           <p style={{ margin: 0, fontSize: "0.9rem", color: "#9ca3af" }}>
             Connecté en tant que <strong>{nickname}</strong>
             {mySeat !== null && ` (siège ${mySeat})`}
@@ -383,10 +455,12 @@ function App() {
                 }}
               >
                 {trumpSymbol}
-              </strong>
+              </strong>{" "}
+              • Phase : <strong>{currentPhase}</strong>
             </p>
           )}
         </div>
+
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <button
             type="button"
@@ -394,7 +468,7 @@ function App() {
             disabled={wsStatus !== "connected"}
             style={{
               padding: "0.4rem 0.75rem",
-              borderRadius: "0.5rem",
+              borderRadius: "9999px",
               border: "none",
               background:
                 wsStatus === "connected"
@@ -413,7 +487,7 @@ function App() {
             onClick={() => setView("lobby")}
             style={{
               padding: "0.4rem 0.75rem",
-              borderRadius: "0.5rem",
+              borderRadius: "9999px",
               border: "1px solid rgba(148,163,184,0.6)",
               background: "transparent",
               color: "#e5e7eb",
@@ -426,42 +500,181 @@ function App() {
         </div>
       </header>
 
+      {/* ZONE PRINCIPALE : tapis plein écran + sidebar en overlay */}
       <main
         style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)",
-          gap: "1rem",
+          flex: 1,
+          marginTop: "0.4rem",
+          position: "relative",
+          minHeight: 0,
         }}
       >
+        {/* TAPIS */}
         <section
           style={{
-            padding: "1rem",
-            borderRadius: "0.75rem",
-            border: "1px solid rgba(148,163,184,0.3)",
-            background: "rgba(15,23,42,0.9)",
+            position: "absolute",
+            inset: 0,
+            borderRadius: "1.25rem",
+            border: "1px solid rgba(148,163,184,0.35)",
+            background:
+              "radial-gradient(circle at 20% 0, #047857 0, #065f46 40%, #052e16 80%)",
+            boxShadow: "0 25px 60px -24px rgba(0,0,0,0.95)",
+            display: "flex",
+            flexDirection: "column",
+            padding: "0.5rem 0.75rem 0.6rem",
           }}
         >
-          <h2 style={{ marginTop: 0, fontSize: "1rem", marginBottom: "0.5rem" }}>
-            Votre main
-          </h2>
+          {/* JOUEURS + PLI AU CENTRE */}
+          <div
+            style={{
+              flex: 1,
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr",
+              gridTemplateRows: "auto 1fr auto",
+              alignItems: "center",
+              justifyItems: "center",
+              gap: "0.25rem",
+              minHeight: 0,
+            }}
+          >
+            <SeatBanner
+              position="top"
+              player={playersByPosition.top}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.top?.seat === gameState.currentPlayer
+                )
+              }
+            />
+            <SeatBanner
+              position="left"
+              player={playersByPosition.left}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.left?.seat === gameState.currentPlayer
+                )
+              }
+            />
+            <SeatBanner
+              position="right"
+              player={playersByPosition.right}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.right?.seat === gameState.currentPlayer
+                )
+              }
+            />
 
-          {isLoadingHand && <p>Distribution des cartes en cours...</p>}
-          {handError && (
-            <p style={{ color: "#f97373", fontSize: "0.9rem" }}>{handError}</p>
-          )}
+            {/* PLI */}
+            <div
+              style={{
+                gridColumn: 2,
+                gridRow: 2,
+                width: "100%",
+                maxWidth: 380,
+                minHeight: 150,
+                borderRadius: "0.85rem",
+                border: "1px solid rgba(15,23,42,0.9)",
+                background:
+                  "radial-gradient(circle at 50% 0, rgba(15,23,42,0.96), rgba(15,23,42,0.8))",
+                boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gridTemplateRows: "1fr 1fr",
+                padding: "0.5rem",
+              }}
+            >
+              {gameState &&
+                gameState.trick &&
+                gameState.trick.cards.map((tc, idx) => {
+                  const pos = cardPositionForPlayerSeat(tc.player);
+                  return (
+                    <TrickCardView
+                      key={`${tc.player}-${idx}`}
+                      position={pos}
+                      card={tc.card}
+                      playerLabel={playerNameForSeat(tc.player)}
+                    />
+                  );
+                })}
+            </div>
 
-          {!isLoadingHand && !handError && (
-            <>
+            <SeatBanner
+              position="bottom"
+              player={playersByPosition.bottom}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.bottom?.seat === gameState.currentPlayer
+                )
+              }
+              isSelf={true}
+            />
+          </div>
+
+          {/* MAIN EN ÉVENTAIL */}
+          <div
+            style={{
+              marginTop: "0.15rem",
+              paddingTop: "0.4rem",
+              borderTop: "1px solid rgba(15,23,42,0.85)",
+              flexShrink: 0,
+            }}
+          >
+            <p
+              style={{
+                margin: "0 0 0.3rem 0.4rem",
+                fontSize: "0.8rem",
+                color: "#e5e7eb",
+              }}
+            >
+              Votre main{" "}
+              {isMyTurn && (
+                <span style={{ color: "#bbf7d0" }}>
+                  — c&apos;est à vous de jouer
+                </span>
+              )}
+              {gameState && gameState.phase === "Finished" && (
+                <span style={{ color: "#facc15", marginLeft: "0.4rem" }}>
+                  — partie terminée
+                </span>
+              )}
+            </p>
+
+            {isLoadingHand && <p>Distribution des cartes en cours...</p>}
+            {handError && (
+              <p style={{ color: "#fee2e2", fontSize: "0.9rem" }}>
+                {handError}
+              </p>
+            )}
+
+            {!isLoadingHand && !handError && (
               <div
                 style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                  marginTop: "0.5rem",
+                  position: "relative",
+                  height: "5.4rem",
+                  maxWidth: "100%",
+                  margin: "0 auto",
                 }}
               >
                 {effectiveHand.map((card, index) => {
+                  const total = effectiveHand.length;
                   const clickable = Boolean(isMyTurn);
+
+                  const maxAngle = 18;
+                  const angleStep =
+                    total > 1 ? (maxAngle * 2) / (total - 1) : 0;
+                  const angle =
+                    total > 1 ? -maxAngle + index * angleStep : 0;
+
+                  const centerShift = (index - (total - 1) / 2) * 30;
+                  const offsetY = -Math.abs(angle) * 0.18;
+
+                  const transform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
+
                   return (
                     <button
                       key={`${card.rank}-${card.suit}-${index}`}
@@ -469,180 +682,52 @@ function App() {
                       onClick={() => clickable && handlePlayCard(card)}
                       disabled={!clickable}
                       style={{
-                        width: "3rem",
-                        height: "4.2rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid rgba(148,163,184,0.6)",
-                        background: clickable ? "#0b1120" : "#111827",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "1rem",
-                        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.6)",
+                        position: "absolute",
+                        left: "50%",
+                        bottom: 0,
+                        transform,
+                        transformOrigin: "50% 100%",
+                        border: "none",
+                        padding: 0,
+                        margin: 0,
+                        background: "transparent",
                         cursor: clickable ? "pointer" : "default",
                       }}
                     >
-                      <span>{card.rank}</span>
-                      <span
-                        style={{
-                          fontSize: "1.2rem",
-                          color:
-                            card.suit === "♥" || card.suit === "♦"
-                              ? "#f97373"
-                              : "#e5e7eb",
-                        }}
-                      >
-                        {card.suit}
-                      </span>
+                      <CardSvg card={card} />
                     </button>
                   );
                 })}
               </div>
-
-              <p
-                style={{
-                  marginTop: "0.75rem",
-                  fontSize: "0.8rem",
-                  color: "#9ca3af",
-                }}
-              >
-                Phase : <strong>{currentPhase}</strong>{" "}
-                {gameState &&
-                  mySeat !== null &&
-                  gameState.currentPlayer === mySeat &&
-                  gameState.phase === "PlayingTricks" && (
-                    <span style={{ color: "#4ade80" }}>
-                      — c&apos;est à vous de jouer
-                    </span>
-                  )}
-                {gameState && gameState.phase === "Finished" && (
-                  <span style={{ color: "#facc15", marginLeft: "0.5rem" }}>
-                    — partie terminée
-                  </span>
-                )}
-              </p>
-
-              {gameState && (
-                <p
-                  style={{
-                    marginTop: "0.25rem",
-                    fontSize: "0.8rem",
-                    color: "#9ca3af",
-                  }}
-                >
-                  Scores : équipe (0 & 2){" "}
-                  <strong>{gameState.scores.team0}</strong> pts — équipe (1 & 3){" "}
-                  <strong>{gameState.scores.team1}</strong> pts
-                </p>
-              )}
-            </>
-          )}
-
-          {gameState && gameState.trick && (
-            <div
-              style={{
-                marginTop: "1rem",
-                paddingTop: "0.75rem",
-                borderTop: "1px solid rgba(55,65,81,0.8)",
-                fontSize: "0.85rem",
-                color: "#9ca3af",
-              }}
-            >
-              <h3
-                style={{
-                  marginTop: 0,
-                  marginBottom: "0.5rem",
-                  fontSize: "0.9rem",
-                }}
-              >
-                Pli en cours
-              </h3>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "0.75rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                {gameState.trick.cards.map((tc, idx) => (
-                  <div
-                    key={`${tc.player}-${idx}`}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      padding: "0.25rem 0.5rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid rgba(148,163,184,0.3)",
-                      background: "#020617",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "0.75rem",
-                        marginBottom: "0.25rem",
-                        color: "#9ca3af",
-                      }}
-                    >
-                      J{tc.player}
-                    </div>
-                    <div
-                      style={{
-                        width: "2.5rem",
-                        height: "3.6rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid rgba(148,163,184,0.6)",
-                        background: "#0b1120",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "0.9rem",
-                      }}
-                    >
-                      <span>{tc.card.rank}</span>
-                      <span
-                        style={{
-                          fontSize: "1.1rem",
-                          color:
-                            tc.card.suit === "♥" || tc.card.suit === "♦"
-                              ? "#f97373"
-                              : "#e5e7eb",
-                        }}
-                      >
-                        {tc.card.suit}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {gameState.trick.winner !== undefined && (
-                <p style={{ marginTop: "0.5rem" }}>
-                  Pli remporté par le joueur{" "}
-                  <strong>J{gameState.trick.winner}</strong>.
-                </p>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </section>
 
-        <section
+        {/* SIDEBAR */}
+        <aside
           style={{
-            padding: "1rem",
-            borderRadius: "0.75rem",
-            border: "1px solid rgba(148,163,184,0.3)",
-            background: "rgba(15,23,42,0.9)",
+            position: "absolute",
+            right: "0.5rem",
+            top: "0.5rem",
+            width: 260,
+            maxWidth: "45vw",
+            borderRadius: "0.9rem",
+            border: "1px solid rgba(148,163,184,0.45)",
+            background: "rgba(15,23,42,0.97)",
+            boxShadow: "0 24px 50px -24px rgba(0,0,0,0.95)",
+            padding: "0.6rem 0.65rem",
             fontSize: "0.9rem",
           }}
         >
-          <h2 style={{ marginTop: 0, fontSize: "1rem", marginBottom: "0.5rem" }}>
-            Joueurs à la table
+          <h2
+            style={{
+              margin: 0,
+              marginBottom: "0.25rem",
+              fontSize: "0.95rem",
+            }}
+          >
+            Joueurs
           </h2>
-
-          {wsError && (
-            <p style={{ color: "#f97373", fontSize: "0.9rem" }}>{wsError}</p>
-          )}
 
           {roomPlayers.length === 0 && !wsError && (
             <p style={{ color: "#9ca3af" }}>
@@ -650,50 +735,371 @@ function App() {
             </p>
           )}
 
-          <ul style={{ listStyle: "none", paddingLeft: 0, margin: 0 }}>
-            {roomPlayers.map((player) => (
-              <li
-                key={player.id}
-                style={{
-                  padding: "0.4rem 0.5rem",
-                  borderRadius: "0.5rem",
-                  border: "1px solid rgba(148,163,184,0.3)",
-                  marginBottom: "0.4rem",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span>
-                  {player.nickname}
-                  {player.seat !== null && ` (Siège ${player.seat})`}
-                </span>
-                <span
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "#6b7280",
-                  }}
-                >
-                  {player.id.slice(-4)}
-                </span>
-              </li>
-            ))}
-          </ul>
-
-          <p
+          <ul
             style={{
-              marginTop: "0.75rem",
-              fontSize: "0.8rem",
-              color: "#6b7280",
+              listStyle: "none",
+              paddingLeft: 0,
+              margin: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.25rem",
             }}
           >
-            Ouvre la même table dans plusieurs onglets/navigateurs, lance la
-            partie et joue tous les plis : à la fin, la partie passe en
-            “terminée” et les scores des deux équipes s&apos;affichent.
-          </p>
-        </section>
+            {roomPlayers.map((player) => {
+              const isCurrent =
+                !!gameState &&
+                player.seat !== null &&
+                player.seat === gameState.currentPlayer;
+              const isYou = player.nickname === nickname;
+
+              return (
+                <li
+                  key={player.id}
+                  style={{
+                    padding: "0.35rem 0.45rem",
+                    borderRadius: "0.6rem",
+                    border: isCurrent
+                      ? "1px solid rgba(34,197,94,0.8)"
+                      : "1px solid rgba(148,163,184,0.4)",
+                    background: isCurrent
+                      ? "linear-gradient(120deg, rgba(22,163,74,0.32), rgba(21,128,61,0.08))"
+                      : "rgba(15,23,42,0.98)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                  }}
+                >
+                  <div>
+                    <span>
+                      {player.nickname}
+                      {isYou && (
+                        <span style={{ color: "#a5b4fc" }}> (vous)</span>
+                      )}
+                      {player.seat !== null && ` — siège ${player.seat}`}
+                    </span>
+                    {isCurrent && (
+                      <span
+                        style={{
+                          marginLeft: "0.3rem",
+                          fontSize: "0.75rem",
+                          color: "#4ade80",
+                        }}
+                      >
+                        tour de jeu
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "#6b7280",
+                    }}
+                  >
+                    {player.id.slice(-4)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+
+          {gameState && (
+            <div
+              style={{
+                marginTop: "0.4rem",
+                padding: "0.4rem 0.5rem 0.35rem",
+                borderRadius: "0.6rem",
+                border: "1px solid rgba(148,163,184,0.45)",
+                background: "rgba(15,23,42,0.98)",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  marginBottom: "0.2rem",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Scores
+              </h3>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.82rem",
+                  color: "#e5e7eb",
+                }}
+              >
+                Équipe (0 &amp; 2) :{" "}
+                <strong>{gameState.scores.team0}</strong> pts
+              </p>
+              <p
+                style={{
+                  margin: "0.1rem 0 0",
+                  fontSize: "0.82rem",
+                  color: "#e5e7eb",
+                }}
+              >
+                Équipe (1 &amp; 3) :{" "}
+                <strong>{gameState.scores.team1}</strong> pts
+              </p>
+            </div>
+          )}
+
+          {gameState && gameState.trick && gameState.trick.winner !== undefined && (
+            <p
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "#9ca3af",
+              }}
+            >
+              Dernier pli : <strong>J{gameState.trick.winner}</strong>
+            </p>
+          )}
+
+          {wsError && (
+            <div
+              style={{
+                marginTop: "0.3rem",
+                padding: "0.45rem 0.5rem",
+                borderRadius: "0.6rem",
+                border: "1px solid rgba(248,113,113,0.7)",
+                background: "rgba(127,29,29,0.5)",
+                color: "#fee2e2",
+                fontSize: "0.8rem",
+              }}
+            >
+              {wsError}
+            </div>
+          )}
+        </aside>
       </main>
     </div>
+  );
+}
+
+// ---------- COMPOSANTS VISUELS ----------
+
+function SeatBanner(props: {
+  position: TablePosition;
+  player?: RoomPlayer;
+  isCurrent: boolean;
+  isSelf?: boolean;
+}) {
+  const { position, player, isCurrent, isSelf } = props;
+  const col = position === "left" ? 1 : position === "right" ? 3 : 2;
+  const row = position === "top" ? 1 : position === "bottom" ? 3 : 2;
+
+  if (!player) {
+    return (
+      <div
+        style={{
+          gridColumn: col,
+          gridRow: row,
+          padding: "0.1rem 0.5rem",
+          opacity: 0.5,
+          fontSize: "0.75rem",
+          color: "#d1d5db",
+        }}
+      >
+        {position === "bottom"
+          ? "En attente de vous..."
+          : "En attente d'un joueur..."}
+      </div>
+    );
+  }
+
+  const label = isSelf ? `${player.nickname} (vous)` : player.nickname;
+
+  return (
+    <div
+      style={{
+        gridColumn: col,
+        gridRow: row,
+        padding: "0.25rem 0.6rem",
+        borderRadius: "9999px",
+        border: isCurrent
+          ? "1px solid rgba(74,222,128,0.9)"
+          : "1px solid rgba(15,23,42,0.85)",
+        background: isCurrent
+          ? "linear-gradient(120deg, rgba(22,163,74,0.6), rgba(21,128,61,0.35))"
+          : "rgba(15,23,42,0.9)",
+        color: "#e5e7eb",
+        fontSize: "0.8rem",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.4rem",
+        boxShadow: isCurrent
+          ? "0 0 0 1px rgba(22,163,74,0.4)"
+          : "0 0 0 0 rgba(0,0,0,0)",
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "9999px",
+          background: isCurrent ? "#4ade80" : "#6b7280",
+        }}
+      />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function TrickCardView(props: {
+  position: TablePosition;
+  card: Card;
+  playerLabel: string;
+}) {
+  const { position, card, playerLabel } = props;
+
+  let justifySelf: "start" | "center" | "end" = "center";
+  let alignSelf: "start" | "center" | "end" = "center";
+
+  if (position === "top") alignSelf = "start";
+  else if (position === "bottom") alignSelf = "end";
+  else if (position === "left") justifySelf = "start";
+  else if (position === "right") justifySelf = "end";
+
+  const animationName =
+    position === "top"
+      ? "trick-from-top"
+      : position === "bottom"
+      ? "trick-from-bottom"
+      : position === "left"
+      ? "trick-from-left"
+      : "trick-from-right";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: position === "top" ? "column" : "column-reverse",
+        alignItems:
+          position === "left"
+            ? "flex-start"
+            : position === "right"
+            ? "flex-end"
+            : "center",
+        justifySelf,
+        alignSelf,
+        gap: "0.2rem",
+        animation: `${animationName} 0.22s ease-out`,
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 56,
+        }}
+      >
+        <CardSvg card={card} small />
+      </div>
+      <span
+        style={{
+          fontSize: "0.7rem",
+          color: "#e5e7eb",
+          opacity: 0.9,
+        }}
+      >
+        {playerLabel}
+      </span>
+    </div>
+  );
+}
+
+function CardSvg(props: { card: Card; small?: boolean }) {
+  const { card, small } = props;
+  const isRed = card.suit === "♥" || card.suit === "♦";
+  const width = small ? 40 : 52;
+  const height = small ? 56 : 72;
+
+  return (
+    <svg
+      viewBox="0 0 52 72"
+      width={width}
+      height={height}
+      style={{ display: "block", filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.75))" }}
+    >
+      <defs>
+        <linearGradient id="card-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#f9fafb" />
+          <stop offset="100%" stopColor="#e5e7eb" />
+        </linearGradient>
+      </defs>
+
+      <rect
+        x={1}
+        y={1}
+        width={50}
+        height={70}
+        rx={6}
+        ry={6}
+        fill="url(#card-bg)"
+        stroke="#d1d5db"
+        strokeWidth={1}
+      />
+      <rect
+        x={4}
+        y={4}
+        width={44}
+        height={64}
+        rx={4}
+        ry={4}
+        fill="#f9fafb"
+        stroke="#e5e7eb"
+        strokeWidth={0.5}
+      />
+
+      <text
+        x={8}
+        y={16}
+        fontSize={10}
+        fontWeight="bold"
+        fill={isRed ? "#b91c1c" : "#0f172a"}
+      >
+        {card.rank}
+      </text>
+      <text
+        x={8}
+        y={28}
+        fontSize={11}
+        fill={isRed ? "#b91c1c" : "#0f172a"}
+      >
+        {card.suit}
+      </text>
+
+      <g transform="rotate(180 26 36)">
+        <text
+          x={8}
+          y={16}
+          fontSize={10}
+          fontWeight="bold"
+          fill={isRed ? "#b91c1c" : "#0f172a"}
+        >
+          {card.rank}
+        </text>
+        <text
+          x={8}
+          y={28}
+          fontSize={11}
+          fill={isRed ? "#b91c1c" : "#0f172a"}
+        >
+          {card.suit}
+        </text>
+      </g>
+
+      <text
+        x={26}
+        y={39}
+        textAnchor="middle"
+        fontSize={20}
+        fill={isRed ? "#b91c1c" : "#0f172a"}
+      >
+        {card.suit}
+      </text>
+    </svg>
   );
 }
 
