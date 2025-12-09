@@ -1,25 +1,20 @@
 export type Suit = "♣" | "♦" | "♥" | "♠";
-export type Rank = "7" | "8" | "9" | "10" | "J" | "Q" | "K" | "A";
+export type Rank = "7" | "8" | "9" | "J" | "Q" | "K" | "10" | "A";
 
 export interface Card {
     suit: Suit;
     rank: Rank;
 }
 
-export interface DealResponse {
-    hands: Record<string, Card[]>;
-    dealer: number;
-    trumpSuit?: Suit | null;
-}
-
-export type GamePhase =
+export type GamePhaseWS =
     | "WaitingForPlayers"
-    | "ChoosingTrump"
+    | "ChoosingTrumpFirstRound"
+    | "ChoosingTrumpSecondRound"
     | "PlayingTricks"
     | "Finished";
 
 export interface TrickCardWS {
-    player: number;
+    player: number; // 0..3
     card: Card;
 }
 
@@ -30,14 +25,26 @@ export interface TrickWS {
 }
 
 export interface GameStateWS {
-    phase: GamePhase;
+    phase: GamePhaseWS;
     dealer: number;
     currentPlayer: number;
-    trumpSuit?: Suit;
+
+    trumpSuit: Suit | null;
+    proposedTrump: Suit | null;
+    turnedCard: Card | null;
+    trumpChooser: number | null;
+    biddingPlayer: number | null;
+    passesInCurrentRound: number;
+
     hands: Record<string, Card[]>;
     trick: TrickWS | null;
     scores: {
         team0: number;
         team1: number;
     };
+}
+
+// Pour l'endpoint /debug/deal si tu l'utilises encore
+export interface DealResponse {
+    hands: Record<string, Card[]>;
 }

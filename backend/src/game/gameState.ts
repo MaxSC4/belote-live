@@ -1,12 +1,21 @@
-import { Card, DealState, Hand, PlayerId, Rank, Suit } from "./types";
-import { dealCards } from "./beloteEngine";
+import { Card, Hand, PlayerId, Rank, Suit } from "./types";
+
+// ---------- Phases de jeu ----------
 
 export enum GamePhase {
     WaitingForPlayers = "WaitingForPlayers",
-    ChoosingTrump = "ChoosingTrump",
+
+    // Phase d'atout
+    ChoosingTrumpFirstRound = "ChoosingTrumpFirstRound",
+    ChoosingTrumpSecondRound = "ChoosingTrumpSecondRound",
+
+    // Après choix d'atout + 2e distribution
     PlayingTricks = "PlayingTricks",
+
     Finished = "Finished",
 }
+
+// ---------- Pli ----------
 
 export interface TrickCard {
     player: PlayerId;
@@ -19,49 +28,245 @@ export interface Trick {
     winner?: PlayerId;
 }
 
+// ---------- État global de la donne ----------
+
 export interface GameState {
     phase: GamePhase;
     dealer: PlayerId;
     currentPlayer: PlayerId;
-    trumpSuit?: Suit;
+
+    // Distribution / atout
+    deck: Card[];                  // cartes restantes dans le paquet
     hands: Record<PlayerId, Hand>;
+    turnedCard: Card | null;       // carte retournée au milieu
+    proposedTrump: Suit | null;    // couleur de la retournée
+    trumpSuit?: Suit;              // atout choisi
+    trumpChooser?: PlayerId;       // preneur
+    biddingPlayer: PlayerId | null;   // joueur qui parle
+    passesInCurrentRound: number;     // 0..4
+
+    // Pli en cours
     trick: Trick | null;
+
+    // Scores de la donne
     scores: {
         team0: number; // joueurs 0 & 2
         team1: number; // joueurs 1 & 3
     };
 }
 
+// ---------- Création du paquet / helpers généraux ----------
+
+const ALL_PLAYERS: PlayerId[] = [0, 1, 2, 3];
+
+const ALL_SUITS: Suit[] = [
+    Suit.Clubs,
+    Suit.Diamonds,
+    Suit.Hearts,
+    Suit.Spades,
+];
+
+const ALL_RANKS: Rank[] = [
+    Rank.Seven,
+    Rank.Eight,
+    Rank.Nine,
+    Rank.Jack,
+    Rank.Queen,
+    Rank.King,
+    Rank.Ten,
+    Rank.Ace,
+];
+
+function createDeck32(): Card[] {
+    const deck: Card[] = [];
+    for (const suit of ALL_SUITS) {
+        for (const rank of ALL_RANKS) {
+            deck.push({ suit, rank });
+        }
+    }
+    return deck;
+}
+
+function shuffle<T>(array: T[]): T[] {
+    const a = [...array];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+// ---------- Démarrage d'une nouvelle donne ----------
+
 /**
  * Crée un nouvel état de partie (une donne) :
- * - distribue les cartes
- * - choisit un atout aléatoire
- * - phase = PlayingTricks (on fera la phase d'atout plus tard)
- * - joueur suivant le donneur commence
+ * - distribue 5 cartes à chaque joueur
+ * - retourne une carte qui propose un atout
+ * - phase = ChoosingTrumpFirstRound
+ * - le joueur après le donneur commence à parler
  */
 export function startNewGame(dealer: PlayerId): GameState {
-    const deal: DealState = dealCards(dealer);
-    const firstPlayer: PlayerId = ((dealer + 1) % 4) as PlayerId;
+    const deck = shuffle(createDeck32());
 
-    const allSuits: Suit[] = [
-        Suit.Clubs,
-        Suit.Diamonds,
-        Suit.Hearts,
-        Suit.Spades,
-    ];
-    const trumpSuit = allSuits[Math.floor(Math.random() * allSuits.length)];
+    const hands: Record<PlayerId, Hand> = {
+        0: [],
+        1: [],
+        2: [],
+        3: [],
+    } as Record<PlayerId, Hand>;
+
+    // 1er passage : 5 cartes par joueur (on ne s'embête pas à faire 3+2)
+    for (const pid of ALL_PLAYERS) {
+        hands[pid] = deck.splice(0, 5);
+    }
+
+    const turnedCard = deck.shift() || null;
+    const proposedTrump = turnedCard ? turnedCard.suit : null;
+
+    const firstToSpeak: PlayerId = ((dealer + 1) % 4) as PlayerId;
 
     return {
-        phase: GamePhase.PlayingTricks,
-        dealer: deal.dealer,
-        currentPlayer: firstPlayer,
-        trumpSuit,
-        hands: deal.hands,
+        phase: GamePhase.ChoosingTrumpFirstRound,
+        dealer,
+        currentPlayer: firstToSpeak,
+        deck,
+        hands,
+        turnedCard,
+        proposedTrump,
+        trumpSuit: undefined,
+        trumpChooser: undefined,
+        biddingPlayer: firstToSpeak,
+        passesInCurrentRound: 0,
         trick: null,
         scores: {
-        team0: 0,
-        team1: 0,
+            team0: 0,
+            team1: 0,
         },
+    };
+}
+
+// ---------- Choix de l'atout (prise / passe) ----------
+
+export type ChooseTrumpPayload =
+    | { action: "take"; suit?: Suit } // 1er tour: suit ignoré; 2e tour: suit = couleur choisie (≠ proposedTrump)
+    | { action: "pass" };
+
+/**
+ * Gère un choix d'atout (prendre/passer) pour un joueur.
+ * Retourne un NOUVEL état (fonction pure).
+ */
+export function chooseTrump(
+    state: GameState,
+    player: PlayerId,
+    payload: ChooseTrumpPayload
+): GameState {
+    if (
+        state.phase !== GamePhase.ChoosingTrumpFirstRound &&
+        state.phase !== GamePhase.ChoosingTrumpSecondRound
+    ) {
+        return state;
+    }
+
+    if (state.biddingPlayer !== player) {
+        // Ce n'est pas à ce joueur de parler
+        return state;
+    }
+
+    // --- CAS "PRENDRE" ---
+    if (payload.action === "take") {
+        let trumpSuit: Suit | undefined;
+
+        if (state.phase === GamePhase.ChoosingTrumpFirstRound) {
+            // 1er tour : atout = suit de la retournée
+            trumpSuit = state.proposedTrump ?? undefined;
+        } else {
+            // 2e tour : le joueur choisit une couleur ≠ proposedTrump
+            if (!payload.suit) return state;
+            if (payload.suit === state.proposedTrump) return state;
+            trumpSuit = payload.suit;
+        }
+
+        if (!trumpSuit) return state;
+
+        // Le joueur prend -> on complète les mains et on passe en phase PlayingTricks
+        let nextState: GameState = {
+            ...state,
+            trumpSuit,
+            trumpChooser: player,
+            biddingPlayer: null,
+            passesInCurrentRound: 0,
+        };
+
+        nextState = dealSecondPass(nextState);
+
+        return {
+            ...nextState,
+            phase: GamePhase.PlayingTricks,
+            currentPlayer: player, // le preneur commence
+            turnedCard: null,
+            proposedTrump: null,
+        };
+    }
+
+    // --- CAS "PASSER" ---
+    const passes = state.passesInCurrentRound + 1;
+
+    // 1er tour : si 4 passes -> 2e tour
+    if (state.phase === GamePhase.ChoosingTrumpFirstRound) {
+        if (passes >= 4) {
+            return {
+                ...state,
+                phase: GamePhase.ChoosingTrumpSecondRound,
+                biddingPlayer: ((state.dealer + 1) % 4) as PlayerId,
+                passesInCurrentRound: 0,
+            };
+        }
+    } else {
+        // 2e tour : si 4 passes -> on redistribue une nouvelle donne
+        if (passes >= 4) {
+            // même donneur pour simplifier
+            return startNewGame(state.dealer);
+        }
+    }
+
+    const nextBiddingPlayer = ((player + 1) % 4) as PlayerId;
+    return {
+        ...state,
+        biddingPlayer: nextBiddingPlayer,
+        passesInCurrentRound: passes,
+    };
+}
+
+/**
+ * Complète les mains à 8 cartes après la prise.
+ * On donne la retournée au preneur puis on complète tout le monde à 8.
+ */
+function dealSecondPass(state: GameState): GameState {
+    const deck = [...state.deck];
+    const hands: Record<PlayerId, Hand> = {
+        0: [...state.hands[0]],
+        1: [...state.hands[1]],
+        2: [...state.hands[2]],
+        3: [...state.hands[3]],
+    } as Record<PlayerId, Hand>;
+
+    // Donner la retournée au preneur (option simple)
+    if (state.turnedCard && state.trumpChooser !== undefined) {
+        hands[state.trumpChooser].push(state.turnedCard);
+    }
+
+    // Compléter toutes les mains à 8 cartes
+    for (const pid of ALL_PLAYERS) {
+        while (hands[pid].length < 8 && deck.length > 0) {
+            hands[pid].push(deck.shift()!);
+        }
+    }
+
+    return {
+        ...state,
+        deck,
+        hands,
+        turnedCard: null,
     };
 }
 
@@ -159,12 +364,12 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
         const challengerIsTrump = isTrump(challenger.card, trumpSuit);
 
         if (winningIsTrump && !challengerIsTrump) {
-        continue; // gagnant actuel reste
+            continue; // gagnant actuel reste
         }
 
         if (!winningIsTrump && challengerIsTrump) {
-        winning = challenger;
-        continue;
+            winning = challenger;
+            continue;
         }
 
         // Si aucun ou tous deux sont atout, on regarde la couleur demandée
@@ -172,22 +377,25 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
         const challengerFollowsLead = challenger.card.suit === leadSuit;
 
         if (!winningFollowsLead && challengerFollowsLead) {
-        winning = challenger;
-        continue;
+            winning = challenger;
+            continue;
         }
 
         if (winningFollowsLead && !challengerFollowsLead) {
-        continue;
+            continue;
         }
 
         // Les deux sont dans la même catégorie (tous les deux atout ou tous les deux couleur demandée)
         // -> compare la force
         const sameTrumpFlag = isTrump(winning.card, trumpSuit); // == challengerIsTrump
         const winningStrength = rankStrength(winning.card.rank, sameTrumpFlag);
-        const challengerStrength = rankStrength(challenger.card.rank, sameTrumpFlag);
+        const challengerStrength = rankStrength(
+            challenger.card.rank,
+            sameTrumpFlag
+        );
 
         if (challengerStrength > winningStrength) {
-        winning = challenger;
+            winning = challenger;
         }
     }
 
@@ -222,7 +430,11 @@ export function validatePlay(
     }
 
     // S'il n'y a pas encore de pli ou qu'on redémarre un pli, aucune contrainte
-    if (!state.trick || state.trick.cards.length === 0 || state.trick.cards.length === 4) {
+    if (
+        !state.trick ||
+        state.trick.cards.length === 0 ||
+        state.trick.cards.length === 4
+    ) {
         return null;
     }
 
@@ -244,7 +456,9 @@ export function validatePlay(
  */
 export function playCard(state: GameState, player: PlayerId, card: Card): void {
     if (state.phase !== GamePhase.PlayingTricks) {
-        throw new Error("On ne peut jouer une carte que pendant la phase des plis.");
+        throw new Error(
+            "On ne peut jouer une carte que pendant la phase des plis."
+        );
     }
 
     const hand = state.hands[player];
@@ -262,9 +476,9 @@ export function playCard(state: GameState, player: PlayerId, card: Card): void {
     // Si le pli précédent est terminé (4 cartes), on démarre un nouveau pli
     if (!state.trick || state.trick.cards.length === 4) {
         state.trick = {
-        cards: [],
-        leader: player,
-        winner: undefined,
+            cards: [],
+            leader: player,
+            winner: undefined,
         };
     }
 
@@ -292,8 +506,6 @@ export function playCard(state: GameState, player: PlayerId, card: Card): void {
     state.scores[winnerTeam] += points;
 
     // Vérifier si toutes les cartes sont jouées (fin de donne)
-    const ALL_PLAYERS: PlayerId[] = [0, 1, 2, 3];
-
     const allHandsEmpty = ALL_PLAYERS.every(
         (pid) => state.hands[pid].length === 0
     );

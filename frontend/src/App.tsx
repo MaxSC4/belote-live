@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { config } from "./config";
-import type { Card, DealResponse, GameStateWS } from "./gameTypes";
+import type { Card, GameStateWS, Suit } from "./gameTypes";
 
 type View = "lobby" | "game";
 
@@ -33,8 +33,18 @@ type GameStateMessage = {
 };
 
 type TablePosition = "bottom" | "top" | "left" | "right";
-
 const TABLE_POSITIONS: TablePosition[] = ["bottom", "left", "top", "right"];
+
+// message pour choose_trump
+type SuitSymbol = Suit;
+type ChooseTrumpPayloadWS =
+  | { action: "take"; suit?: SuitSymbol }
+  | { action: "pass" };
+
+type ChooseTrumpMessageWS = {
+  type: "choose_trump";
+  payload: ChooseTrumpPayloadWS;
+};
 
 // Styles globaux pour les animations
 const GLOBAL_STYLES = `
@@ -76,10 +86,6 @@ function App() {
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState("");
 
-  const [hand, setHand] = useState<Card[]>([]);
-  const [isLoadingHand, setIsLoadingHand] = useState(false);
-  const [handError, setHandError] = useState<string | null>(null);
-
   const [wsStatus, setWsStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
@@ -95,8 +101,10 @@ function App() {
   const [showEndOverlay, setShowEndOverlay] = useState(false);
   const prevPhaseRef = useRef<string | null>(null);
 
-  // Hover sur les cartes de la main
+  // Hover + distribution main
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [displayHand, setDisplayHand] = useState<Card[]>([]);
+  const prevHandRef = useRef<Card[]>([]);
 
   // Injecter les keyframes une fois
   useEffect(() => {
@@ -121,35 +129,6 @@ function App() {
     setRoomCode(randomCode);
   };
 
-  // ---- HTTP DEBUG DEAL (fallback) ----
-
-  useEffect(() => {
-    if (view !== "game") return;
-
-    const fetchDeal = async () => {
-      setIsLoadingHand(true);
-      setHandError(null);
-
-      try {
-        const response = await fetch(`${config.backendUrl}/debug/deal`);
-        if (!response.ok) {
-          throw new Error(`Erreur HTTP ${response.status}`);
-        }
-
-        const data: DealResponse = await response.json();
-        const myHand = data.hands["0"] || [];
-        setHand(myHand);
-      } catch (error) {
-        console.error(error);
-        setHandError("Impossible de récupérer la donne depuis le serveur.");
-      } finally {
-        setIsLoadingHand(false);
-      }
-    };
-
-    fetchDeal();
-  }, [view]);
-
   // ---- WEBSOCKET ----
 
   useEffect(() => {
@@ -163,6 +142,8 @@ function App() {
       setWsError(null);
       setGameState(null);
       setHoveredIndex(null);
+      setDisplayHand([]);
+      prevHandRef.current = [];
       return;
     }
 
@@ -227,10 +208,10 @@ function App() {
   const mySeat =
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
-  const effectiveHand: Card[] =
+  const fullHand: Card[] =
     gameState && mySeat !== null
       ? gameState.hands[String(mySeat)] || []
-      : hand;
+      : [];
 
   const isMyTurn =
     gameState &&
@@ -251,7 +232,7 @@ function App() {
   };
 
   const currentPhase = gameState?.phase ?? "—";
-  const trumpSymbol = gameState?.trumpSuit ?? "—";
+  const trumpSymbol = gameState?.trumpSuit ?? null;
 
   function seatToTablePosition(seat: number | null): TablePosition | null {
     if (seat === null) return null;
@@ -302,6 +283,94 @@ function App() {
     }
     prevPhaseRef.current = phase ?? null;
   }, [gameState?.phase]);
+
+  // ---- Animation de distribution de la main ----
+
+  useEffect(() => {
+    if (!gameState || mySeat === null) {
+      setDisplayHand([]);
+      prevHandRef.current = [];
+      return;
+    }
+
+    const full = gameState.hands[String(mySeat)] || [];
+    const prev = prevHandRef.current;
+
+    // Nouvelle donne : on reçoit 5 cartes en phase ChoosingTrumpFirstRound
+    const isNewDeal =
+      prev.length === 0 &&
+      full.length === 5 &&
+      gameState.phase === "ChoosingTrumpFirstRound";
+
+    if (isNewDeal) {
+      setDisplayHand([]);
+      let i = 0;
+      const interval = setInterval(() => {
+        i++;
+        setDisplayHand(full.slice(0, i));
+        if (i >= full.length) {
+          clearInterval(interval);
+        }
+      }, 120);
+      prevHandRef.current = full;
+      return () => clearInterval(interval);
+    }
+
+    // Complément à 8 cartes une fois l'atout choisi
+    const isCompletingHand =
+      prev.length === 5 &&
+      full.length === 8 &&
+      gameState.phase === "PlayingTricks";
+
+    if (isCompletingHand) {
+      setDisplayHand(prev);
+      const newCards = full.slice(5);
+      let i = 0;
+      const interval = setInterval(() => {
+        i++;
+        setDisplayHand((current) => [...current, newCards[i - 1]]);
+        if (i >= newCards.length) {
+          clearInterval(interval);
+        }
+      }, 140);
+      prevHandRef.current = full;
+      return () => clearInterval(interval);
+    }
+
+    // Fallback (connexion en cours de donne, reconnection, etc.)
+    setDisplayHand(full);
+    prevHandRef.current = full;
+  }, [gameState, mySeat]);
+
+  // ---- Choix d'atout (prise / passe) ----
+
+  const isFirstRound = gameState?.phase === "ChoosingTrumpFirstRound";
+  const isSecondRound = gameState?.phase === "ChoosingTrumpSecondRound";
+  const isBiddingPlayer =
+    !!gameState &&
+    mySeat !== null &&
+    gameState.biddingPlayer === mySeat;
+
+  const sendChooseTrump = (payload: ChooseTrumpPayloadWS) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const message: ChooseTrumpMessageWS = {
+      type: "choose_trump",
+      payload,
+    };
+    wsRef.current.send(JSON.stringify(message));
+  };
+
+  const handleTakeFirstRound = () => {
+    sendChooseTrump({ action: "take" });
+  };
+
+  const handlePass = () => {
+    sendChooseTrump({ action: "pass" });
+  };
+
+  const handleTakeSecondRound = (suit: SuitSymbol) => {
+    sendChooseTrump({ action: "take", suit });
+  };
 
   // ---------- LOBBY ----------
 
@@ -536,7 +605,7 @@ function App() {
                       : "#e5e7eb",
                 }}
               >
-                {trumpSymbol}
+                {trumpSymbol ?? "—"}
               </strong>{" "}
               • Phase : <strong>{currentPhase}</strong>
             </p>
@@ -695,6 +764,7 @@ function App() {
                 gridTemplateColumns: "1fr 1fr",
                 gridTemplateRows: "1fr 1fr",
                 padding: "0.5rem",
+                position: "relative",
               }}
             >
               {gameState &&
@@ -725,6 +795,170 @@ function App() {
             />
           </div>
 
+          {/* OVERLAY DE PRISE / ENCHÈRES */}
+          {gameState && (isFirstRound || isSecondRound) && (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                padding: "0.7rem 1rem",
+                borderRadius: "0.9rem",
+                background: "rgba(15,23,42,0.96)",
+                border: "1px solid rgba(148,163,184,0.7)",
+                boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
+                minWidth: 260,
+                textAlign: "center",
+                zIndex: 10,
+              }}
+            >
+              {gameState.turnedCard && (
+                <div style={{ marginBottom: "0.4rem" }}>
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "#9ca3af",
+                      display: "block",
+                      marginBottom: "0.3rem",
+                    }}
+                  >
+                    Carte retournée :
+                  </span>
+                  <div style={{ display: "inline-block" }}>
+                    <CardSvg card={gameState.turnedCard} small />
+                  </div>
+                </div>
+              )}
+
+              {isFirstRound && (
+                <>
+                  <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                    {isBiddingPlayer ? (
+                      <>
+                        Voulez-vous prendre à{" "}
+                        <strong>{gameState.proposedTrump}</strong> ?
+                      </>
+                    ) : (
+                      <>
+                        En attente de{" "}
+                        {shortSeatLabel(gameState.biddingPlayer!)} (1er tour)…
+                      </>
+                    )}
+                  </p>
+                  {isBiddingPlayer && (
+                    <div
+                      style={{
+                        marginTop: "0.5rem",
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleTakeFirstRound}
+                        style={{
+                          padding: "0.35rem 0.8rem",
+                          borderRadius: "9999px",
+                          border: "none",
+                          background:
+                            "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
+                          color: "#f9fafb",
+                          fontSize: "0.8rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Prendre
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handlePass}
+                        style={{
+                          padding: "0.35rem 0.8rem",
+                          borderRadius: "9999px",
+                          border: "1px solid rgba(148,163,184,0.7)",
+                          background: "transparent",
+                          color: "#e5e7eb",
+                          fontSize: "0.8rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Passer
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {isSecondRound && (
+                <>
+                  <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                    {isBiddingPlayer ? (
+                      <>Choisissez une couleur d&apos;atout ou passez :</>
+                    ) : (
+                      <>
+                        En attente de{" "}
+                        {shortSeatLabel(gameState.biddingPlayer!)} (2ᵉ tour)…
+                      </>
+                    )}
+                  </p>
+
+                  {isBiddingPlayer && (
+                    <div
+                      style={{
+                        marginTop: "0.5rem",
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: "0.35rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {(["♠", "♥", "♦", "♣"] as SuitSymbol[])
+                        .filter((s) => s !== gameState.proposedTrump)
+                        .map((suit) => (
+                          <button
+                            key={suit}
+                            type="button"
+                            onClick={() => handleTakeSecondRound(suit)}
+                            style={{
+                              padding: "0.3rem 0.7rem",
+                              borderRadius: "9999px",
+                              border: "1px solid rgba(148,163,184,0.7)",
+                              background: "rgba(15,23,42,0.95)",
+                              color:
+                                suit === "♥" || suit === "♦"
+                                  ? "#fecaca"
+                                  : "#e5e7eb",
+                              fontSize: "0.8rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            {suit}
+                          </button>
+                        ))}
+                      <button
+                        type="button"
+                        onClick={handlePass}
+                        style={{
+                          padding: "0.3rem 0.7rem",
+                          borderRadius: "9999px",
+                          border: "1px solid rgba(148,163,184,0.7)",
+                          background: "transparent",
+                          color: "#e5e7eb",
+                          fontSize: "0.8rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Passer
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {/* MAIN EN ÉVENTAIL */}
           <div
             style={{
@@ -754,78 +988,68 @@ function App() {
               )}
             </p>
 
-            {isLoadingHand && <p>Distribution des cartes en cours...</p>}
-            {handError && (
-              <p style={{ color: "#fee2e2", fontSize: "0.9rem" }}>
-                {handError}
-              </p>
-            )}
+            <div
+              style={{
+                position: "relative",
+                height: "6.8rem",
+                maxWidth: "100%",
+                margin: "0 auto",
+              }}
+            >
+              {displayHand.map((card, index) => {
+                const total = displayHand.length;
+                const clickable = Boolean(isMyTurn);
 
-            {!isLoadingHand && !handError && (
-              <div
-                style={{
-                  position: "relative",
-                  height: "6.8rem",
-                  maxWidth: "100%",
-                  margin: "0 auto",
-                }}
-              >
-                {effectiveHand.map((card, index) => {
-                  const total = effectiveHand.length;
-                  const clickable = Boolean(isMyTurn);
+                const maxAngle = 18;
+                const angleStep =
+                  total > 1 ? (maxAngle * 2) / (total - 1) : 0;
+                const angle = total > 1 ? -maxAngle + index * angleStep : 0;
 
-                  const maxAngle = 18;
-                  const angleStep =
-                    total > 1 ? (maxAngle * 2) / (total - 1) : 0;
-                  const angle =
-                    total > 1 ? -maxAngle + index * angleStep : 0;
+                const centerShift = (index - (total - 1) / 2) * 34;
+                const offsetY = -Math.abs(angle) * 0.22;
 
-                  const centerShift = (index - (total - 1) / 2) * 34;
-                  const offsetY = -Math.abs(angle) * 0.22;
+                const baseTransform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
 
-                  const baseTransform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
+                const isHovered = clickable && hoveredIndex === index;
+                const finalTransform = isHovered
+                  ? `${baseTransform} translateY(-10px) scale(1.08)`
+                  : baseTransform;
 
-                  const isHovered = clickable && hoveredIndex === index;
-                  const finalTransform = isHovered
-                    ? `${baseTransform} translateY(-10px) scale(1.08)`
-                    : baseTransform;
-
-                  return (
-                    <button
-                      key={`${card.rank}-${card.suit}-${index}`}
-                      type="button"
-                      onClick={() => clickable && handlePlayCard(card)}
-                      disabled={!clickable}
-                      onMouseEnter={() =>
-                        clickable && setHoveredIndex(index)
-                      }
-                      onMouseLeave={() =>
-                        setHoveredIndex((prev) =>
-                          prev === index ? null : prev
-                        )
-                      }
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        bottom: 0,
-                        transform: finalTransform,
-                        transformOrigin: "50% 100%",
-                        border: "none",
-                        padding: 0,
-                        margin: 0,
-                        background: "transparent",
-                        cursor: clickable ? "pointer" : "default",
-                        transition:
-                          "transform 0.15s ease-out, filter 0.15s ease-out",
-                        filter: isHovered ? "brightness(1.05)" : "none",
-                      }}
-                    >
-                      <CardSvg card={card} />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                return (
+                  <button
+                    key={`${card.rank}-${card.suit}-${index}`}
+                    type="button"
+                    onClick={() => clickable && handlePlayCard(card)}
+                    disabled={!clickable}
+                    onMouseEnter={() =>
+                      clickable && setHoveredIndex(index)
+                    }
+                    onMouseLeave={() =>
+                      setHoveredIndex((prev) =>
+                        prev === index ? null : prev
+                      )
+                    }
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      bottom: 0,
+                      transform: finalTransform,
+                      transformOrigin: "50% 100%",
+                      border: "none",
+                      padding: 0,
+                      margin: 0,
+                      background: "transparent",
+                      cursor: clickable ? "pointer" : "default",
+                      transition:
+                        "transform 0.15s ease-out, filter 0.15s ease-out",
+                      filter: isHovered ? "brightness(1.05)" : "none",
+                    }}
+                  >
+                    <CardSvg card={card} />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
 
