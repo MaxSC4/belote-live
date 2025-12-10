@@ -36,6 +36,13 @@ type TablePosition = "bottom" | "top" | "left" | "right";
 const TABLE_POSITIONS: TablePosition[] = ["bottom", "left", "top", "right"];
 
 type SuitSymbol = Suit;
+const SUIT_SYMBOLS: SuitSymbol[] = ["♠", "♥", "♦", "♣"];
+const PHASE_LABELS: Record<string, string> = {
+  ChoosingTrumpFirstRound: "Prise · 1ᵉʳ tour",
+  ChoosingTrumpSecondRound: "Prise · 2ᵉ tour",
+  PlayingTricks: "Pli en cours",
+  Finished: "Donne terminée",
+};
 
 // message pour choose_trump
 type ChooseTrumpPayloadWS =
@@ -46,6 +53,10 @@ type ChooseTrumpMessageWS = {
   type: "choose_trump";
   payload: ChooseTrumpPayloadWS;
 };
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 function sortHandBySuitColor(hand: Card[], trumpSuit: Suit | null): Card[] {
   // Noir: ♣, ♠ / Rouge: ♦, ♥
@@ -88,49 +99,6 @@ function sortHandBySuitColor(hand: Card[], trumpSuit: Suit | null): Card[] {
   });
 }
 
-// Styles globaux pour les animations
-const GLOBAL_STYLES = `
-@keyframes trick-from-top {
-  from { transform: translateY(-12px) scale(0.9); opacity: 0; }
-  to   { transform: translateY(0) scale(1); opacity: 1; }
-}
-@keyframes trick-from-bottom {
-  from { transform: translateY(12px) scale(0.9); opacity: 0; }
-  to   { transform: translateY(0) scale(1); opacity: 1; }
-}
-@keyframes trick-from-left {
-  from { transform: translateX(-12px) scale(0.9); opacity: 0; }
-  to   { transform: translateX(0) scale(1); opacity: 1; }
-}
-@keyframes trick-from-right {
-  from { transform: translateX(12px) scale(0.9); opacity: 0; }
-  to   { transform: translateX(0) scale(1); opacity: 1; }
-}
-@keyframes trick-winner-banner {
-  0%   { transform: translateY(-10px) scale(0.95); opacity: 0; }
-  20%  { transform: translateY(0) scale(1); opacity: 1; }
-  80%  { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-8px) scale(0.95); opacity: 0; }
-}
-@keyframes final-score-pop {
-  0%   { transform: scale(0.8); opacity: 0; }
-  60%  { transform: scale(1.05); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-@keyframes backdrop-fade {
-  from { opacity: 0; }
-  to   { opacity: 0.75; }
-}
-@keyframes hand-shuffle {
-  0% { transform: translateY(0); }
-  20% { transform: translateY(-4px); }
-  40% { transform: translateY(4px); }
-  60% { transform: translateY(-2px); }
-  80% { transform: translateY(2px); }
-  100% { transform: translateY(0); }
-}
-`;
-
 function App() {
   const [view, setView] = useState<View>("lobby");
   const [nickname, setNickname] = useState("");
@@ -158,16 +126,6 @@ function App() {
 
   // Tri
   const [isSorting, setIsSorting] = useState(false);
-
-  // Injecter les keyframes une fois
-  useEffect(() => {
-    const styleEl = document.createElement("style");
-    styleEl.innerHTML = GLOBAL_STYLES;
-    document.head.appendChild(styleEl);
-    return () => {
-      document.head.removeChild(styleEl);
-    };
-  }, []);
 
   // ---- LOBBY ----
 
@@ -262,9 +220,7 @@ function App() {
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
   const fullHand: Card[] =
-    gameState && mySeat !== null
-      ? gameState.hands[String(mySeat)] || []
-      : [];
+    gameState && mySeat !== null ? gameState.hands[String(mySeat)] || [] : [];
 
   const showSortButton =
     !!gameState &&
@@ -287,8 +243,7 @@ function App() {
     (beloteStage === 0 || gameState.belote.holder === mySeat);
 
   const beloteButtonLabel =
-    beloteStage === 0 ? "🎺 Belote !" : "🎺 Rebelote !";
-
+    beloteStage === 0 ? "Belote !" : "Rebelote !";
 
   const handleAnnounceBelote = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -311,7 +266,6 @@ function App() {
     setTimeout(() => setIsSorting(false), 350);
   };
 
-
   const handlePlayCard = (card: Card) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (!gameState || mySeat === null || !isMyTurn) return;
@@ -324,14 +278,26 @@ function App() {
     );
   };
 
-  const currentPhase = gameState?.phase ?? "—";
+  const friendlyPhase =
+    gameState && gameState.phase
+      ? PHASE_LABELS[gameState.phase] ?? gameState.phase
+      : null;
   const trumpSymbol = gameState?.trumpSuit ?? null;
 
   const currentDealNumber = gameState?.dealNumber ?? 1;
 
   const matchTeam0 = gameState?.matchScores?.team0 ?? 0;
   const matchTeam1 = gameState?.matchScores?.team1 ?? 0;
-
+  const MAX_MATCH_POINTS = 1001;
+  const MIN_BAR_PERCENT = 3;
+  const getProgress = (score: number) => {
+    if (score <= 0) return MIN_BAR_PERCENT;
+    const ratio = (score / MAX_MATCH_POINTS) * 100;
+    return Math.min(100, Math.max(MIN_BAR_PERCENT, ratio));
+  };
+  const team0Progress = getProgress(matchTeam0);
+  const team1Progress = getProgress(matchTeam1);
+  const trickWinner = gameState?.trick?.winner;
 
   function seatToTablePosition(seat: number | null): TablePosition | null {
     if (seat === null) return null;
@@ -362,16 +328,21 @@ function App() {
     return seatToTablePosition(seat) ?? "top";
   }
 
+  const remainingCardsForSeat = (seat: number | null): number => {
+    if (seat === null || !gameState) return 0;
+    if (seat === mySeat) return displayHand.length;
+    return gameState.hands[String(seat)]?.length ?? 0;
+  };
+
   // ---- Animations : gagnant de pli & fin de donne ----
 
   useEffect(() => {
-    if (!gameState || !gameState.trick) return;
-    if (gameState.trick.winner === undefined) return;
+    if (trickWinner === undefined) return;
 
     setShowTrickWinnerBanner(true);
     const timer = setTimeout(() => setShowTrickWinnerBanner(false), 1800);
     return () => clearTimeout(timer);
-  }, [gameState?.trick?.winner]);
+  }, [trickWinner]);
 
   useEffect(() => {
     const phase = gameState?.phase;
@@ -477,152 +448,65 @@ function App() {
 
   if (view === "lobby") {
     return (
-      <div
-        style={{
-          height: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background:
-            "radial-gradient(circle at top, #1d283a 0, #020617 55%, #000 100%)",
-          color: "#e5e7eb",
-          fontFamily:
-            "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 480,
-            padding: "2rem",
-            borderRadius: "1.5rem",
-            background: "rgba(15,23,42,0.92)",
-            boxShadow: "0 25px 50px -12px rgba(0,0,0,0.75)",
-            border: "1px solid rgba(148,163,184,0.3)",
-          }}
-        >
-          <h1 style={{ fontSize: "1.9rem", marginBottom: "0.25rem" }}>
-            belote-live
-          </h1>
-          <p style={{ margin: 0, color: "#9ca3af", fontSize: "0.9rem" }}>
-            Belote en ligne entre collègues, temps réel, 4 joueurs.
-          </p>
-
-          <div
-            style={{
-              marginTop: "1.5rem",
-              marginBottom: "1.25rem",
-              padding: "0.5rem 0.75rem",
-              borderRadius: "0.75rem",
-              background:
-                "linear-gradient(120deg, rgba(15,23,42,0.9), rgba(22,101,52,0.3))",
-              border: "1px solid rgba(34,197,94,0.35)",
-              fontSize: "0.8rem",
-              color: "#bbf7d0",
-            }}
-          >
-            <span style={{ marginRight: "0.4rem" }}>🃏</span>
-            Créez un code de table, partagez-le à 3 collègues et lancez la
-            partie.
-          </div>
-
-          <button
-            type="button"
-            onClick={handleCreateRoom}
-            style={{
-              marginBottom: "1rem",
-              padding: "0.5rem 0.75rem",
-              borderRadius: "9999px",
-              border: "1px solid rgba(94,234,212,0.3)",
-              background:
-                "linear-gradient(120deg, rgba(45,212,191,0.18), rgba(56,189,248,0.08))",
-              color: "#5eead4",
-              fontSize: "0.85rem",
-              cursor: "pointer",
-            }}
-          >
-            Générer un code de table aléatoire
-          </button>
-
-          <form
-            onSubmit={handleJoin}
-            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-          >
-            <div>
-              <label
-                htmlFor="nickname"
-                style={{
-                  display: "block",
-                  marginBottom: "0.25rem",
-                  fontSize: "0.9rem",
-                }}
-              >
-                Pseudo
-              </label>
-              <input
-                id="nickname"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                placeholder="Ex : Nono, Cheblan, Elo, Spider-Man..."
-                style={{
-                  width: "100%",
-                  padding: "0.5rem 0.75rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148,163,184,0.6)",
-                  background: "rgba(15,23,42,0.9)",
-                  color: "#e5e7eb",
-                  outline: "none",
-                }}
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="roomCode"
-                style={{
-                  display: "block",
-                  marginBottom: "0.25rem",
-                  fontSize: "0.9rem",
-                }}
-              >
-                Code de table
-              </label>
-              <input
-                id="roomCode"
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="Ex : TABLE42"
-                style={{
-                  width: "100%",
-                  padding: "0.5rem 0.75rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148,163,184,0.6)",
-                  background: "rgba(15,23,42,0.9)",
-                  color: "#e5e7eb",
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  outline: "none",
-                }}
-              />
+      <div className="min-h-screen bg-lobby px-6 py-10 font-sans text-slate-100">
+        <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-4xl flex-col justify-center">
+          <div className="rounded-[2.5rem] border border-slate-400/30 bg-slate-950/95 p-12 shadow-[0_35px_70px_-30px_rgba(0,0,0,0.85)]">
+            <div className="flex items-center justify-between gap-6">
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+                  Lobby
+                </p>
+                <h2 className="mt-2 text-3xl font-semibold text-white">
+                  Créez ou rejoignez une table
+                </h2>
+                <p className="text-sm text-slate-400">
+                  Code personnalisé ? Partagez-le aux collègues et lancez la donne.
+                </p>
+              </div>
+              <span className="hidden rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200 lg:block">
+                4 joueurs
+              </span>
             </div>
 
             <button
-              type="submit"
-              style={{
-                marginTop: "0.75rem",
-                padding: "0.6rem 0.75rem",
-                borderRadius: "0.75rem",
-                border: "none",
-                background:
-                  "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
-                color: "#f9fafb",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
+              type="button"
+              onClick={handleCreateRoom}
+              className="mt-6 w-full rounded-2xl border border-cyan-300/40 bg-gradient-to-r from-cyan-400/20 via-emerald-300/10 to-sky-400/30 px-5 py-3 text-base font-semibold text-cyan-100 transition hover:border-cyan-200/70 hover:text-cyan-50"
             >
-              Rejoindre la table
+              Générer un code de table aléatoire
             </button>
-          </form>
+
+            <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
+              <label className="flex flex-col gap-2 text-sm">
+                <span className="text-slate-300">Pseudo</span>
+                <input
+                  id="nickname"
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  placeholder="Ex : Nono, Cheblan, Elo, Spider-Man..."
+                  className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm">
+                <span className="text-slate-300">Code de table</span>
+                <input
+                  id="roomCode"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  placeholder="Ex : TABLE42"
+                  className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-300"
+                />
+              </label>
+
+              <button
+                type="submit"
+                className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-5 py-4 text-base font-semibold text-white transition hover:from-emerald-400 hover:via-green-500 hover:to-emerald-300"
+              >
+                Rejoindre la table
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     );
@@ -630,110 +514,60 @@ function App() {
 
   // ---------- JEU ----------
 
+  const trumpColorClass =
+    trumpSymbol === "♥" || trumpSymbol === "♦"
+      ? "text-rose-300"
+      : "text-slate-100";
+
   return (
-    <div
-      style={{
-        height: "100vh",
-        background:
-          "radial-gradient(circle at top, #1f2937 0, #020617 50%, #000 100%)",
-        color: "#e5e7eb",
-        padding: "0.75rem",
-        fontFamily:
-          "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
+    <div className="flex min-h-screen flex-col overflow-hidden bg-game px-3 pb-3 pt-4 font-sans text-slate-100 lg:h-screen">
       {/* HEADER */}
-      <header
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingBottom: "0.6rem",
-          borderBottom: "1px solid rgba(15,23,42,0.9)",
-        }}
-      >
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <h1 style={{ margin: 0, fontSize: "1.4rem" }}>Table {roomCode}</h1>
-            <span
-              style={{
-                padding: "0.1rem 0.5rem",
-                borderRadius: "9999px",
-                border: "1px solid rgba(148,163,184,0.5)",
-                fontSize: "0.7rem",
-                color: "#9ca3af",
-              }}
-            >
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-900 pb-3">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-semibold text-white">
+              Table {roomCode || "—"}
+            </h1>
+            <span className="rounded-full border border-slate-600/60 px-3 py-1 text-xs uppercase tracking-wide text-slate-400">
               4 joueurs · belote classique
             </span>
           </div>
-          <p style={{ margin: "0.25rem 0 0", fontSize: "0.9rem" }}>
+          <p className="text-sm text-slate-300">
             Connecté en tant que <strong>{nickname}</strong>
             {mySeat !== null && ` (${shortSeatLabel(mySeat)})`}
           </p>
-          <p
-            style={{
-              margin: "0.1rem 0 0",
-              fontSize: "0.8rem",
-              color: "#6b7280",
-            }}
-          >
-            WebSocket :{" "}
-            {wsStatus === "connected"
-              ? "connecté ✅"
-              : wsStatus === "connecting"
-              ? "connexion en cours..."
-              : "déconnecté ❌"}
-          </p>
-          {gameState && (
-            <p
-              style={{
-                margin: "0.1rem 0 0",
-                fontSize: "0.85rem",
-                color: "#9ca3af",
-              }}
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <span
+              className={cx(
+                "flex items-center gap-1 rounded-full border px-2 py-0.5",
+                wsStatus === "connected"
+                  ? "border-emerald-400/80 text-emerald-200"
+                  : wsStatus === "connecting"
+                  ? "border-amber-400/80 text-amber-200"
+                  : "border-rose-400/80 text-rose-200"
+              )}
             >
-              Manche&nbsp;
-              <strong style={{ color: "#facc15" }}>{currentDealNumber}</strong>
-              {" · "}
-              Atout :{" "}
-              <strong
-                style={{
-                  color:
-                    trumpSymbol === "♥" || trumpSymbol === "♦"
-                      ? "#f97373"
-                      : "#e5e7eb",
-                }}
-              >
-                {trumpSymbol ?? "—"}
-              </strong>
-              {" · "}
-              Phase : <strong>{currentPhase}</strong>
-            </p>
-          )}
+              <span className="text-lg">•</span>
+              {wsStatus === "connected"
+                ? "Connecté"
+                : wsStatus === "connecting"
+                ? "Connexion en cours"
+                : "Déconnecté"}
+            </span>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={handleStartGame}
             disabled={wsStatus !== "connected"}
-            style={{
-              padding: "0.4rem 0.9rem",
-              borderRadius: "9999px",
-              border: "none",
-              background:
-                wsStatus === "connected"
-                  ? "linear-gradient(135deg, #22c55e, #16a34a)"
-                  : "rgba(55,65,81,0.8)",
-              color: "#f9fafb",
-              cursor: wsStatus === "connected" ? "pointer" : "not-allowed",
-              fontSize: "0.85rem",
-            }}
+            className={cx(
+              "rounded-full px-4 py-2 text-sm font-medium text-white transition",
+              wsStatus === "connected"
+                ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 hover:from-emerald-400 hover:to-emerald-400"
+                : "cursor-not-allowed bg-slate-600/70"
+            )}
           >
             Lancer la partie
           </button>
@@ -741,15 +575,7 @@ function App() {
           <button
             type="button"
             onClick={() => setView("lobby")}
-            style={{
-              padding: "0.4rem 0.9rem",
-              borderRadius: "9999px",
-              border: "1px solid rgba(148,163,184,0.6)",
-              background: "transparent",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
+            className="rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
           >
             Quitter la table
           </button>
@@ -757,70 +583,59 @@ function App() {
       </header>
 
       {/* ZONE PRINCIPALE */}
-      <main
-        style={{
-          flex: 1,
-          marginTop: "0.4rem",
-          position: "relative",
-          minHeight: 0,
-        }}
-      >
+      <main className="relative mt-2 flex min-h-0 flex-1 gap-4">
         {/* TAPIS */}
-        <section
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: "1.25rem",
-            border: "1px solid rgba(148,163,184,0.35)",
-            background:
-              "radial-gradient(circle at 20% 0, #047857 0, #065f46 40%, #052e16 80%)",
-            boxShadow: "0 25px 60px -24px rgba(0,0,0,0.95)",
-            display: "flex",
-            flexDirection: "column",
-            padding: "0.5rem 0.75rem 0.6rem",
-          }}
-        >
+        <section className="relative flex h-full w-full flex-1 flex-col rounded-[1.25rem] border border-slate-500/40 bg-felt px-3 pb-3 pt-2 shadow-table">
+          {gameState && (
+            <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-300/40 bg-slate-950/85 px-4 py-2 text-xs uppercase tracking-[0.35em] text-slate-200 shadow-[0_18px_35px_-20px_rgba(0,0,0,0.8)]">
+              <div className="flex flex-col">
+                <span className="text-[0.55rem] text-slate-400">Manche</span>
+                <span className="text-lg font-semibold text-white">
+                  #{currentDealNumber}
+                </span>
+              </div>
+              <span className="hidden h-10 w-px bg-emerald-200/30 sm:block" />
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-center text-center">
+                  <span className="text-[0.55rem] text-slate-400">Atout</span>
+                  <span
+                    className={cx(
+                      "text-2xl font-bold tracking-[0.1em]",
+                      trumpColorClass
+                    )}
+                  >
+                    {trumpSymbol ?? "—"}
+                  </span>
+                </div>
+              </div>
+              {friendlyPhase && (
+                <>
+                  <span className="hidden h-10 w-px bg-emerald-200/30 sm:block" />
+                  <div className="flex flex-col text-left">
+                    <span className="text-[0.55rem] text-slate-400">Statut</span>
+                    <span className="text-sm font-semibold text-emerald-200 tracking-normal">
+                      {friendlyPhase}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {/* Bannière gagnant du pli */}
           {showTrickWinnerBanner &&
             gameState &&
             gameState.trick &&
             gameState.trick.winner !== undefined && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "0.7rem",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  padding: "0.35rem 0.8rem",
-                  borderRadius: "9999px",
-                  background:
-                    "linear-gradient(120deg, rgba(22,163,74,0.9), rgba(21,128,61,0.8))",
-                  border: "1px solid rgba(34,197,94,0.9)",
-                  fontSize: "0.8rem",
-                  boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
-                  animation: "trick-winner-banner 1.8s ease-out",
-                }}
-              >
-                💥 Pli pour{" "}
-                <strong>
+              <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-400/80 bg-gradient-to-r from-emerald-600/90 to-emerald-500/80 px-4 py-1 text-xs font-medium text-emerald-50 shadow-[0_18px_35px_-24px_rgba(0,0,0,1)] animate-trick-winner-banner">
+                💥 Pli pour
+                <strong className="text-white">
                   {playerNameForSeat(gameState.trick.winner)}
                 </strong>
               </div>
             )}
 
           {/* JOUEURS + PLI AU CENTRE */}
-          <div
-            style={{
-              flex: 1,
-              display: "grid",
-              gridTemplateColumns: "1fr auto 1fr",
-              gridTemplateRows: "auto 1fr auto",
-              alignItems: "center",
-              justifyItems: "center",
-              gap: "0.25rem",
-              minHeight: 0,
-            }}
-          >
+          <div className="grid flex-1 grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
             <SeatBanner
               position="top"
               player={playersByPosition.top}
@@ -830,6 +645,9 @@ function App() {
                   playersByPosition.top?.seat === gameState.currentPlayer
                 )
               }
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.top?.seat ?? null
+              )}
             />
             <SeatBanner
               position="left"
@@ -840,6 +658,9 @@ function App() {
                   playersByPosition.left?.seat === gameState.currentPlayer
                 )
               }
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.left?.seat ?? null
+              )}
             />
             <SeatBanner
               position="right"
@@ -850,28 +671,13 @@ function App() {
                   playersByPosition.right?.seat === gameState.currentPlayer
                 )
               }
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.right?.seat ?? null
+              )}
             />
 
             {/* PLI */}
-            <div
-              style={{
-                gridColumn: 2,
-                gridRow: 2,
-                width: "100%",
-                maxWidth: 400,
-                minHeight: 180,
-                borderRadius: "0.85rem",
-                border: "1px solid rgba(15,23,42,0.9)",
-                background:
-                  "radial-gradient(circle at 50% 0, rgba(15,23,42,0.96), rgba(15,23,42,0.8))",
-                boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gridTemplateRows: "1fr 1fr",
-                padding: "0.5rem",
-                position: "relative",
-              }}
-            >
+            <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
               {gameState &&
                 gameState.trick &&
                 gameState.trick.cards.map((tc, idx) => {
@@ -897,227 +703,121 @@ function App() {
                 )
               }
               isSelf={true}
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.bottom?.seat ?? null
+              )}
             />
           </div>
 
           {/* OVERLAY DE PRISE / ENCHÈRES */}
           {gameState && (isFirstRound || isSecondRound) && (
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                padding: "0.7rem 1rem",
-                borderRadius: "0.9rem",
-                background: "rgba(15,23,42,0.96)",
-                border: "1px solid rgba(148,163,184,0.7)",
-                boxShadow: "0 18px 35px -24px rgba(0,0,0,1)",
-                minWidth: 260,
-                textAlign: "center",
-                zIndex: 10,
-              }}
-            >
+            <div className="pointer-events-auto absolute left-1/2 top-1/2 z-10 w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-xl border border-slate-400/70 bg-slate-950/95 px-5 py-4 text-center text-sm shadow-[0_18px_35px_-24px_rgba(0,0,0,1)]">
               {gameState.turnedCard && (
-                <div style={{ marginBottom: "0.4rem" }}>
-                  <span
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "#9ca3af",
-                      display: "block",
-                      marginBottom: "0.3rem",
-                    }}
-                  >
-                    Carte retournée :
+                <div className="mb-3 space-y-1">
+                  <span className="block text-xs uppercase tracking-wide text-slate-400">
+                    Carte retournée
                   </span>
-                  <div style={{ display: "inline-block" }}>
+                  <div className="mx-auto inline-block">
                     <CardSvg card={gameState.turnedCard} small />
                   </div>
                 </div>
               )}
 
               {isFirstRound && (
-                <>
-                  <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-200">
                     {isBiddingPlayer ? (
                       <>
-                        Voulez-vous prendre à{" "}
+                        Voulez-vous prendre à {" "}
                         <strong>{gameState.proposedTrump}</strong> ?
                       </>
                     ) : (
                       <>
-                        En attente de{" "}
+                        En attente de {" "}
                         {shortSeatLabel(gameState.biddingPlayer!)} (1er tour)…
                       </>
                     )}
                   </p>
                   {isBiddingPlayer && (
-                    <div
-                      style={{
-                        marginTop: "0.5rem",
-                        display: "flex",
-                        justifyContent: "center",
-                        gap: "0.5rem",
-                      }}
-                    >
+                    <div className="flex justify-center gap-2 text-sm">
                       <button
                         type="button"
                         onClick={handleTakeFirstRound}
-                        style={{
-                          padding: "0.35rem 0.8rem",
-                          borderRadius: "9999px",
-                          border: "none",
-                          background:
-                            "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
-                          color: "#f9fafb",
-                          fontSize: "0.8rem",
-                          cursor: "pointer",
-                        }}
+                        className="rounded-full bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-1.5 font-semibold text-white"
                       >
                         Prendre
                       </button>
                       <button
                         type="button"
                         onClick={handlePass}
-                        style={{
-                          padding: "0.35rem 0.8rem",
-                          borderRadius: "9999px",
-                          border: "1px solid rgba(148,163,184,0.7)",
-                          background: "transparent",
-                          color: "#e5e7eb",
-                          fontSize: "0.8rem",
-                          cursor: "pointer",
-                        }}
+                        className="rounded-full border border-slate-500/70 px-4 py-1.5 text-slate-200 transition hover:border-slate-300"
                       >
                         Passer
                       </button>
                     </div>
                   )}
-                </>
+                </div>
               )}
 
               {isSecondRound && (
-                <>
-                  <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-200">
                     {isBiddingPlayer ? (
                       <>Choisissez une couleur d&apos;atout ou passez :</>
                     ) : (
                       <>
-                        En attente de{" "}
+                        En attente de {" "}
                         {shortSeatLabel(gameState.biddingPlayer!)} (2ᵉ tour)…
                       </>
                     )}
                   </p>
 
                   {isBiddingPlayer && (
-                    <div
-                      style={{
-                        marginTop: "0.5rem",
-                        display: "flex",
-                        justifyContent: "center",
-                        gap: "0.35rem",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      {(["♠", "♥", "♦", "♣"] as SuitSymbol[])
-                        .filter((s) => s !== gameState.proposedTrump)
-                        .map((suit) => (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {SUIT_SYMBOLS.filter((s) => s !== gameState.proposedTrump).map(
+                        (suit) => (
                           <button
                             key={suit}
                             type="button"
                             onClick={() => handleTakeSecondRound(suit)}
-                            style={{
-                              padding: "0.3rem 0.7rem",
-                              borderRadius: "9999px",
-                              border: "1px solid rgba(148,163,184,0.7)",
-                              background: "rgba(15,23,42,0.95)",
-                              color:
-                                suit === "♥" || suit === "♦"
-                                  ? "#fecaca"
-                                  : "#e5e7eb",
-                              fontSize: "0.8rem",
-                              cursor: "pointer",
-                            }}
+                            className={cx(
+                              "rounded-full border px-3 py-1 text-sm",
+                              suit === "♥" || suit === "♦"
+                                ? "border-rose-300/60 text-rose-200"
+                                : "border-slate-400/70 text-slate-200"
+                            )}
                           >
                             {suit}
                           </button>
-                        ))}
+                        )
+                      )}
                       <button
                         type="button"
                         onClick={handlePass}
-                        style={{
-                          padding: "0.3rem 0.7rem",
-                          borderRadius: "9999px",
-                          border: "1px solid rgba(148,163,184,0.7)",
-                          background: "transparent",
-                          color: "#e5e7eb",
-                          fontSize: "0.8rem",
-                          cursor: "pointer",
-                        }}
+                        className="rounded-full border border-slate-500/70 px-3 py-1 text-sm text-slate-200"
                       >
                         Passer
                       </button>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}
 
           {/* MAIN EN ÉVENTAIL */}
-          <div
-            style={{
-              marginTop: "0.15rem",
-              paddingTop: "0.4rem",
-              borderTop: "1px solid rgba(15,23,42,0.85)",
-              flexShrink: 0,
-            }}
-          >
-            <p
-              style={{
-                margin: "0 0 0.3rem 0.4rem",
-                fontSize: "0.8rem",
-                color: "#e5e7eb",
-              }}
-            >
-              Votre main{" "}
-              {isMyTurn && (
-                <span style={{ color: "#bbf7d0" }}>
-                  — c&apos;est à vous de jouer
-                </span>
-              )}
-              {gameState && gameState.phase === "Finished" && (
-                <span style={{ color: "#facc15", marginLeft: "0.4rem" }}>
-                  — donne terminée
-                </span>
-              )}
-            </p>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "0.4rem",
-                margin: "0 0 0.35rem 0.4rem",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
+          <div className="mt-6 flex flex-col px-2 text-slate-100">
+            <div className="mx-auto mb-3 flex w-full max-w-lg flex-wrap items-center justify-center gap-2 text-sm">
               {gameState && canAnnounceBelote && (
                 <button
                   type="button"
                   onClick={handleAnnounceBelote}
-                  style={{
-                    padding: "0.3rem 0.8rem",
-                    borderRadius: "9999px",
-                    border: "1px solid rgba(250,204,21,0.8)",
-                    background:
-                      "linear-gradient(135deg, #facc15, #eab308, #facc15)",
-                    color: "#111827",
-                    fontSize: "0.8rem",
-                    cursor: "pointer",
-                  }}
+                  className="group flex items-center gap-2 rounded-full border border-amber-300/70 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-300 px-4 py-1.5 font-semibold text-slate-900 shadow-[0_14px_30px_-18px_rgba(251,191,36,0.9)] transition hover:scale-105"
                 >
-                  {beloteButtonLabel}
+                  <span className="text-base">🎺</span>
+                  <span className="text-xs font-bold uppercase tracking-[0.25em]">
+                    {beloteButtonLabel}
+                  </span>
                 </button>
               )}
 
@@ -1125,43 +825,47 @@ function App() {
                 <button
                   type="button"
                   onClick={handleSortHand}
-                  style={{
-                    padding: "0.3rem 0.8rem",
-                    borderRadius: "9999px",
-                    border: "1px solid rgba(148,163,184,0.8)",
-                    background: "rgba(15,23,42,0.95)",
-                    color: "#e5e7eb",
-                    fontSize: "0.8rem",
-                    cursor: "pointer",
-                  }}
+                  className="group flex items-center gap-2 rounded-full border border-cyan-300/60 bg-slate-950/80 px-4 py-1.5 font-semibold text-cyan-100 shadow-[0_12px_25px_-16px_rgba(16,185,129,0.9)] transition hover:border-cyan-200"
                 >
-                  🪄 Trier la main
+                  <span className="text-base">🪄</span>
+                  <span className="text-xs font-bold uppercase tracking-[0.25em]">
+                    Trier la main
+                  </span>
                 </button>
               )}
             </div>
 
+            <div className="mb-2 flex flex-wrap items-center justify-center gap-3 text-center text-sm font-semibold uppercase tracking-wide text-slate-200">
+              <span className="text-base tracking-[0.35em]">Votre main</span>
+              {isMyTurn && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-500/20 px-3 py-1 text-xs font-bold tracking-[0.25em] text-emerald-100 shadow-[0_10px_25px_-15px_rgba(16,185,129,1)] animate-pulse">
+                  ▶ A VOUS DE JOUER
+                </span>
+              )}
+              {gameState && gameState.phase === "Finished" && (
+                <span className="text-amber-300 normal-case">— donne terminée</span>
+              )}
+            </div>
 
-            <div
-              style={{
-                position: "relative",
-                height: "6.8rem",
-                maxWidth: "100%",
-                margin: "0 auto",
-                animation: isSorting
-                  ? "hand-shuffle 0.35s ease-out"
-                  : "none",
-              }}
-            >
+            <div className="relative mx-auto h-[9.5rem] w-full max-w-4xl">
+              {isSorting && (
+                <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.4em] text-emerald-200">
+                    <span className="h-px w-8 bg-emerald-200/50" />
+                    <span className="animate-pulse">Tri en cours</span>
+                    <span className="h-px w-8 bg-emerald-200/50" />
+                  </div>
+                </div>
+              )}
               {displayHand.map((card, index) => {
                 const total = displayHand.length;
                 const clickable = Boolean(isMyTurn);
 
                 const maxAngle = 18;
-                const angleStep =
-                  total > 1 ? (maxAngle * 2) / (total - 1) : 0;
+                const angleStep = total > 1 ? (maxAngle * 2) / (total - 1) : 0;
                 const angle = total > 1 ? -maxAngle + index * angleStep : 0;
 
-                const centerShift = (index - (total - 1) / 2) * 34;
+                const centerShift = (index - (total - 1) / 2) * 42;
                 const offsetY = -Math.abs(angle) * 0.22;
 
                 const baseTransform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
@@ -1177,28 +881,17 @@ function App() {
                     type="button"
                     onClick={() => clickable && handlePlayCard(card)}
                     disabled={!clickable}
-                    onMouseEnter={() =>
-                      clickable && setHoveredIndex(index)
-                    }
+                    onMouseEnter={() => clickable && setHoveredIndex(index)}
                     onMouseLeave={() =>
-                      setHoveredIndex((prev) =>
-                        prev === index ? null : prev
-                      )
+                      setHoveredIndex((prev) => (prev === index ? null : prev))
                     }
+                    className="absolute left-1/2 bottom-0 -translate-x-1/2 transform-gpu focus:outline-none"
                     style={{
-                      position: "absolute",
-                      left: "50%",
-                      bottom: 0,
                       transform: finalTransform,
                       transformOrigin: "50% 100%",
-                      border: "none",
-                      padding: 0,
-                      margin: 0,
-                      background: "transparent",
                       cursor: clickable ? "pointer" : "default",
-                      transition:
-                        "transform 0.15s ease-out, filter 0.15s ease-out",
                       filter: isHovered ? "brightness(1.05)" : "none",
+                      transition: "transform 0.15s ease-out, filter 0.15s ease-out",
                     }}
                   >
                     <CardSvg card={card} />
@@ -1210,47 +903,14 @@ function App() {
         </section>
 
         {/* SIDEBAR */}
-        <aside
-          style={{
-            position: "absolute",
-            right: "0.5rem",
-            top: "0.5rem",
-            width: 260,
-            maxWidth: "45vw",
-            borderRadius: "0.9rem",
-            border: "1px solid rgba(148,163,184,0.45)",
-            background: "rgba(15,23,42,0.97)",
-            boxShadow: "0 24px 50px -24px rgba(0,0,0,0.95)",
-            padding: "0.6rem 0.65rem",
-            fontSize: "0.9rem",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              marginBottom: "0.25rem",
-              fontSize: "0.95rem",
-            }}
-          >
-            Joueurs
-          </h2>
+        <aside className="w-[260px] max-w-[320px] shrink-0 space-y-3 rounded-xl border border-slate-500/40 bg-slate-950/95 p-3 text-sm shadow-panel">
+          <h2 className="text-base font-medium text-white">Joueurs</h2>
 
           {roomPlayers.length === 0 && !wsError && (
-            <p style={{ color: "#9ca3af" }}>
-              En attente d&apos;autres joueurs...
-            </p>
+            <p className="text-slate-400">En attente d&apos;autres joueurs...</p>
           )}
 
-          <ul
-            style={{
-              listStyle: "none",
-              paddingLeft: 0,
-              margin: 0,
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.25rem",
-            }}
-          >
+          <ul className="flex list-none flex-col gap-2">
             {roomPlayers.map((player) => {
               const isCurrent =
                 !!gameState &&
@@ -1261,144 +921,120 @@ function App() {
               return (
                 <li
                   key={player.id}
-                  style={{
-                    padding: "0.35rem 0.45rem",
-                    borderRadius: "0.6rem",
-                    border: isCurrent
-                      ? "1px solid rgba(34,197,94,0.8)"
-                      : "1px solid rgba(148,163,184,0.4)",
-                    background: isCurrent
-                      ? "linear-gradient(120deg, rgba(22,163,74,0.32), rgba(21,128,61,0.08))"
-                      : "rgba(15,23,42,0.98)",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                  }}
+                  className={cx(
+                    "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                    isCurrent
+                      ? "border-emerald-400/60 bg-emerald-500/10"
+                      : "border-slate-500/40 bg-slate-900/80"
+                  )}
                 >
                   <div>
-                    <span>
+                    <span className="text-slate-100">
                       {player.nickname}
-                      {isYou && (
-                        <span style={{ color: "#a5b4fc" }}> (vous)</span>
-                      )}
-                      {player.seat !== null &&
-                        ` — ${shortSeatLabel(player.seat)}`}
+                      {isYou && <span className="text-indigo-200"> (vous)</span>}
+                      {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
                     </span>
                     {isCurrent && (
-                      <span
-                        style={{
-                          marginLeft: "0.3rem",
-                          fontSize: "0.75rem",
-                          color: "#4ade80",
-                        }}
-                      >
+                      <span className="ml-2 text-xs text-emerald-300">
                         tour de jeu
                       </span>
                     )}
                   </div>
-                  <span
-                    style={{
-                      fontSize: "0.75rem",
-                      color: "#6b7280",
-                    }}
-                  >
-                    {player.id.slice(-4)}
-                  </span>
+                  <span className="text-xs text-slate-500">{player.id.slice(-4)}</span>
                 </li>
               );
             })}
           </ul>
 
-            {gameState && (
-              <div
-                style={{
-                  marginTop: "0.4rem",
-                  padding: "0.4rem 0.5rem 0.35rem",
-                  borderRadius: "0.6rem",
-                  border: "1px solid rgba(148,163,184,0.45)",
-                  background: "rgba(15,23,42,0.98)",
-                }}
-              >
-                <h3
-                  style={{
-                    margin: 0,
-                    marginBottom: "0.2rem",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  Scores (donne)
-                </h3>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "0.82rem",
-                    color: "#e5e7eb",
-                  }}
-                >
-                  Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
-                  <strong>{gameState.scores.team0}</strong> pts
+          {gameState && (
+            <div className="space-y-3 rounded-2xl border border-slate-500/40 bg-slate-900/85 px-3 py-4">
+              <div className="rounded-xl border border-emerald-400/40 bg-gradient-to-r from-emerald-900/40 to-emerald-700/20 p-3 text-xs uppercase tracking-widest text-emerald-100">
+                <p className="mb-2 flex items-center justify-between text-[0.65rem] text-emerald-200">
+                  <span>Score de la donne</span>
+                  <span className="text-[0.6rem] text-emerald-300/80">
+                    manche {currentDealNumber}
+                  </span>
                 </p>
-                <p
-                  style={{
-                    margin: "0.1rem 0 0",
-                    fontSize: "0.82rem",
-                    color: "#e5e7eb",
-                  }}
-                >
-                  Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
-                  <strong>{gameState.scores.team1}</strong> pts
-                </p>
-
-                <h3
-                  style={{
-                    margin: "0.6rem 0 0.2rem",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  Scores cumulés (manche)
-                </h3>
-                <p style={{ margin: "0.1rem 0", color: "#facc15", fontSize: "0.82rem" }}>
-                  Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
-                  <strong>{matchTeam0}</strong> pts
-                </p>
-                <p style={{ margin: "0.1rem 0", color: "#facc15", fontSize: "0.82rem" }}>
-                  Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
-                  <strong>{matchTeam1}</strong> pts
-                </p>
-
-                {gameState.belote.stage > 0 && (
-                  <p
-                    style={{
-                      margin: "0.25rem 0 0",
-                      fontSize: "0.8rem",
-                      color: "#fde68a",
-                    }}
-                  >
-                    🎖{" "}
-                    {gameState.belote.stage === 1
-                      ? "Belote annoncée par "
-                      : "Belote & rebelote annoncées par "}
-                    {gameState.belote.holder !== null &&
-                      shortSeatLabel(gameState.belote.holder)}
-                    {gameState.belote.stage === 2 &&
-                      ` (+${gameState.belote.points} pts)`}
-                  </p>
-                )}
+                <div className="grid grid-cols-2 gap-2 text-base font-semibold text-white">
+                  <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
+                    <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
+                      {shortSeatLabel(0)}·{shortSeatLabel(2)}
+                    </p>
+                    <p className="text-2xl">{gameState.scores.team0}</p>
+                    <p className="text-[0.6rem] text-emerald-100/70">pts</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
+                    <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
+                      {shortSeatLabel(1)}·{shortSeatLabel(3)}
+                    </p>
+                    <p className="text-2xl">{gameState.scores.team1}</p>
+                    <p className="text-[0.6rem] text-emerald-100/70">pts</p>
+                  </div>
+                </div>
               </div>
-            )}
+
+              <div className="rounded-xl border border-amber-300/40 bg-gradient-to-b from-slate-950/40 to-amber-900/10 p-3">
+                <div className="mb-2 flex items-center justify-between text-[0.65rem] uppercase tracking-[0.35em] text-amber-200">
+                  <span>Scores cumulés</span>
+                  <span>match</span>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
+                      <span>
+                        {shortSeatLabel(0)} &amp; {shortSeatLabel(2)}
+                      </span>
+                      <span className="text-base font-semibold text-white">
+                        {matchTeam0} pts
+                      </span>
+                    </div>
+                    <div className="mt-1 h-2 rounded-full bg-slate-800/70">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
+                        style={{ width: `${team0Progress}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
+                      <span>
+                        {shortSeatLabel(1)} &amp; {shortSeatLabel(3)}
+                      </span>
+                      <span className="text-base font-semibold text-white">
+                        {matchTeam1} pts
+                      </span>
+                    </div>
+                    <div className="mt-1 h-2 rounded-full bg-slate-800/70">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
+                        style={{ width: `${team1Progress}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {gameState.belote.stage > 0 && (
+                <div className="rounded-xl border border-amber-200/50 bg-amber-500/10 px-3 py-2 text-[0.7rem] text-amber-100">
+                  <p className="flex items-center gap-1">
+                    <span>🎖</span>
+                    <span>
+                      {gameState.belote.stage === 1
+                        ? "Belote annoncée par "
+                        : "Belote & rebelote annoncées par "}
+                      {gameState.belote.holder !== null &&
+                        shortSeatLabel(gameState.belote.holder)}
+                      {gameState.belote.stage === 2 &&
+                        ` (+${gameState.belote.points} pts)`}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {wsError && (
-            <div
-              style={{
-                marginTop: "0.3rem",
-                padding: "0.45rem 0.5rem",
-                borderRadius: "0.6rem",
-                border: "1px solid rgba(248,113,113,0.7)",
-                background: "rgba(127,29,29,0.5)",
-                color: "#fee2e2",
-                fontSize: "0.8rem",
-              }}
-            >
+            <div className="rounded-lg border border-rose-400/70 bg-rose-900/50 px-3 py-2 text-xs text-rose-100">
               {wsError}
             </div>
           )}
@@ -1407,80 +1043,24 @@ function App() {
         {/* OVERLAY SCORE FINAL */}
         {showEndOverlay && gameState && (
           <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 50,
-            }}
+            className="absolute inset-0 z-50 flex items-center justify-center"
             onClick={() => setShowEndOverlay(false)}
           >
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "rgba(15,23,42,0.85)",
-                animation: "backdrop-fade 0.25s ease-out",
-              }}
-            />
-            <div
-              style={{
-                position: "relative",
-                padding: "1.4rem 2rem",
-                borderRadius: "1.2rem",
-                background:
-                  "radial-gradient(circle at top, #0f172a 0, #020617 60%)",
-                border: "1px solid rgba(148,163,184,0.7)",
-                boxShadow: "0 25px 60px -24px rgba(0,0,0,1)",
-                maxWidth: "90%",
-                textAlign: "center",
-                animation: "final-score-pop 0.3s ease-out",
-              }}
-            >
-              <h2
-                style={{
-                  margin: 0,
-                  marginBottom: "0.4rem",
-                  fontSize: "1.1rem",
-                }}
-              >
-                🎉 Donne terminée
-              </h2>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "0.9rem",
-                  color: "#e5e7eb",
-                }}
-              >
-                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
-                <strong>{gameState.scores.team0}</strong> pts
+            <div className="absolute inset-0 bg-slate-950/85 animate-backdrop-fade" />
+            <div className="relative max-w-sm rounded-2xl border border-slate-500/70 bg-gradient-to-b from-slate-900 to-slate-950 px-8 py-6 text-center text-sm shadow-[0_25px_60px_-24px_rgba(0,0,0,1)] animate-final-score-pop">
+              <h2 className="text-lg font-semibold text-white">🎉 Donne terminée</h2>
+              <p className="mt-2 text-slate-200">
+                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :
+                <strong className="ml-1 text-white">{gameState.scores.team0}</strong> pts
               </p>
-              <p
-                style={{
-                  margin: "0.1rem 0 0.6rem",
-                  fontSize: "0.9rem",
-                  color: "#e5e7eb",
-                }}
-              >
-                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
-                <strong>{gameState.scores.team1}</strong> pts
+              <p className="mt-1 text-slate-200">
+                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :
+                <strong className="ml-1 text-white">{gameState.scores.team1}</strong> pts
               </p>
               <button
                 type="button"
                 onClick={() => setShowEndOverlay(false)}
-                style={{
-                  marginTop: "0.3rem",
-                  padding: "0.35rem 0.9rem",
-                  borderRadius: "9999px",
-                  border: "1px solid rgba(148,163,184,0.7)",
-                  background: "rgba(15,23,42,0.95)",
-                  color: "#e5e7eb",
-                  fontSize: "0.8rem",
-                  cursor: "pointer",
-                }}
+                className="mt-4 rounded-full border border-slate-500/70 px-5 py-2 text-sm text-slate-100"
               >
                 OK
               </button>
@@ -1499,26 +1079,21 @@ function SeatBanner(props: {
   player?: RoomPlayer;
   isCurrent: boolean;
   isSelf?: boolean;
+  cardsCount?: number;
 }) {
-  const { position, player, isCurrent, isSelf } = props;
+  const { position, player, isCurrent, isSelf, cardsCount } = props;
   const col = position === "left" ? 1 : position === "right" ? 3 : 2;
   const row = position === "top" ? 1 : position === "bottom" ? 3 : 2;
 
   if (!player) {
     return (
       <div
-        style={{
-          gridColumn: col,
-          gridRow: row,
-          padding: "0.1rem 0.5rem",
-          opacity: 0.5,
-          fontSize: "0.75rem",
-          color: "#d1d5db",
-        }}
+        className="text-xs text-slate-200/70"
+        style={{ gridColumn: col, gridRow: row }}
       >
         {position === "bottom"
           ? "En attente de vous..."
-          : "En attente d&apos;un joueur..."}
+          : "En attente d'un joueur..."}
       </div>
     );
   }
@@ -1530,36 +1105,26 @@ function SeatBanner(props: {
 
   return (
     <div
-      style={{
-        gridColumn: col,
-        gridRow: row,
-        padding: "0.25rem 0.6rem",
-        borderRadius: "9999px",
-        border: isCurrent
-          ? "1px solid rgba(74,222,128,0.9)"
-          : "1px solid rgba(15,23,42,0.85)",
-        background: isCurrent
-          ? "linear-gradient(120deg, rgba(22,163,74,0.6), rgba(21,128,61,0.35))"
-          : "rgba(15,23,42,0.9)",
-        color: "#e5e7eb",
-        fontSize: "0.8rem",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.4rem",
-        boxShadow: isCurrent
-          ? "0 0 0 1px rgba(22,163,74,0.4)"
-          : "0 0 0 0 rgba(0,0,0,0)",
-      }}
+      className={cx(
+        "inline-flex flex-col items-center gap-1 rounded-full border px-3 py-2 text-xs text-white transition",
+        isCurrent
+          ? "border-emerald-400/80 bg-emerald-500/20 shadow-[0_0_0_1px_rgba(16,185,129,0.4)]"
+          : "border-slate-900/80 bg-slate-900/70"
+      )}
+      style={{ gridColumn: col, gridRow: row }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "9999px",
-          background: isCurrent ? "#4ade80" : "#6b7280",
-        }}
-      />
-      <span>{label}</span>
+      <div className="flex items-center gap-2">
+        <span
+          className={cx(
+            "h-1.5 w-1.5 rounded-full",
+            isCurrent ? "bg-emerald-400" : "bg-slate-500"
+          )}
+        />
+        <span>{label}</span>
+      </div>
+      {!isSelf && (cardsCount ?? 0) > 0 && (
+        <CardBackFan count={cardsCount ?? 0} />
+      )}
     </div>
   );
 }
@@ -1571,78 +1136,116 @@ function TrickCardView(props: {
 }) {
   const { position, card, playerLabel } = props;
 
-  let justifySelf: "start" | "center" | "end" = "center";
-  let alignSelf: "start" | "center" | "end" = "center";
-
-  if (position === "top") alignSelf = "start";
-  else if (position === "bottom") alignSelf = "end";
-  else if (position === "left") justifySelf = "start";
-  else if (position === "right") justifySelf = "end";
-
-  const animationName =
+  const animationClass =
     position === "top"
-      ? "trick-from-top"
+      ? "animate-trick-from-top"
       : position === "bottom"
-      ? "trick-from-bottom"
+      ? "animate-trick-from-bottom"
       : position === "left"
-      ? "trick-from-left"
-      : "trick-from-right";
+      ? "animate-trick-from-left"
+      : "animate-trick-from-right";
+
+  const basePositionClass: Record<TablePosition, string> = {
+    top: "left-1/2 top-4 -translate-x-1/2",
+    bottom: "left-1/2 bottom-4 -translate-x-1/2",
+    left: "left-4 top-1/2 -translate-y-1/2",
+    right: "right-4 top-1/2 -translate-y-1/2",
+  };
+
+  const directionClass =
+    position === "top"
+      ? "flex-col"
+      : position === "bottom"
+      ? "flex-col-reverse"
+      : position === "left"
+      ? "flex-row"
+      : "flex-row-reverse";
+
+  const alignmentClass =
+    position === "left"
+      ? "items-center text-left"
+      : position === "right"
+      ? "items-center text-right"
+      : "items-center text-center";
 
   return (
     <div
-      style={{
-        display: "flex",
-        flexDirection: position === "top" ? "column" : "column-reverse",
-        alignItems:
-          position === "left"
-            ? "flex-start"
-            : position === "right"
-            ? "flex-end"
-            : "center",
-        justifySelf,
-        alignSelf,
-        gap: "0.25rem",
-        animation: `${animationName} 0.22s ease-out`,
-      }}
+      className={cx(
+        "absolute flex gap-2 text-xs text-slate-100 drop-shadow-[0_15px_25px_rgba(0,0,0,0.65)]",
+        basePositionClass[position],
+        directionClass,
+        alignmentClass,
+        animationClass
+      )}
     >
-      <div
-        style={{
-          width: 52,
-          height: 72,
-        }}
-      >
-        <CardSvg card={card} small />
-      </div>
-      <span
-        style={{
-          fontSize: "0.75rem",
-          color: "#e5e7eb",
-          opacity: 0.9,
-        }}
-      >
+      <div className="rounded-full border border-emerald-300/40 bg-slate-900/70 px-3 py-0.5 text-[0.6rem] uppercase tracking-[0.4em] text-emerald-200 shadow-inner shadow-black/40">
         {playerLabel}
+      </div>
+      <div className="relative">
+        <CardSvg card={card} variant="trick" />
+        <div className="pointer-events-none absolute inset-1 rounded-lg border border-white/10" />
+      </div>
+    </div>
+  );
+}
+
+function CardBackFan(props: { count: number }) {
+  const { count } = props;
+  const cardsToShow = Math.min(5, count);
+  const cardsArray = Array.from({ length: cardsToShow });
+  const angleSpread = 14;
+  const startAngle = -((cardsToShow - 1) / 2) * angleSpread;
+
+  return (
+    <div className="relative mt-1 flex flex-col items-center">
+      <div className="relative h-12 w-16">
+        {cardsArray.map((_, idx) => {
+          const angle = startAngle + idx * angleSpread;
+          return (
+            <div
+              key={idx}
+              className="absolute left-1/2 top-1/2"
+              style={{
+                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-4px)`,
+                zIndex: idx,
+              }}
+            >
+              <CardBackSvg variant="mini" />
+            </div>
+          );
+        })}
+      </div>
+      <span className="mt-1 text-[0.6rem] uppercase tracking-[0.4em] text-slate-200">
+        {count}
       </span>
     </div>
   );
 }
 
-function CardSvg(props: { card: Card; small?: boolean }) {
-  const { card, small } = props;
+type CardSizeVariant = "hand" | "trick" | "mini";
+
+function CardSvg(props: {
+  card: Card;
+  variant?: CardSizeVariant;
+  small?: boolean;
+}) {
+  const { card, variant, small } = props;
   const isRed = card.suit === "♥" || card.suit === "♦";
 
-  // Cartes plus grandes : main > pli
-  const width = small ? 52 : 68;
-  const height = small ? 72 : 92;
+  const sizeKey: CardSizeVariant = small ? "mini" : variant ?? "hand";
+  const sizeByVariant: Record<CardSizeVariant, { width: number; height: number }> = {
+    hand: { width: 88, height: 122 },
+    trick: { width: 76, height: 108 },
+    mini: { width: 52, height: 72 },
+  };
+  const { width, height } = sizeByVariant[sizeKey];
 
   return (
     <svg
       viewBox="0 0 52 72"
       width={width}
       height={height}
-      style={{
-        display: "block",
-        filter: "drop-shadow(0 8px 14px rgba(0,0,0,0.85))",
-      }}
+      className="block drop-shadow-[0_8px_14px_rgba(0,0,0,0.85)]"
     >
       <defs>
         <linearGradient id="card-bg" x1="0" y1="0" x2="1" y2="1">
@@ -1721,6 +1324,73 @@ function CardSvg(props: { card: Card; small?: boolean }) {
       >
         {card.suit}
       </text>
+    </svg>
+  );
+}
+
+function CardBackSvg(props: { variant?: "mini" | "stack" }) {
+  const { variant = "mini" } = props;
+  const sizeMap = {
+    mini: { width: 34, height: 50 },
+    stack: { width: 52, height: 72 },
+  } as const;
+  const { width, height } = sizeMap[variant];
+
+  return (
+    <svg
+      viewBox="0 0 52 72"
+      width={width}
+      height={height}
+      className="block drop-shadow-[0_6px_10px_rgba(0,0,0,0.7)]"
+    >
+      <defs>
+        <linearGradient id="card-back" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#1e293b" />
+          <stop offset="100%" stopColor="#0f172a" />
+        </linearGradient>
+        <pattern
+          id="card-dots"
+          x="0"
+          y="0"
+          width="6"
+          height="6"
+          patternUnits="userSpaceOnUse"
+        >
+          <circle cx="1" cy="1" r="1" fill="#1f2937" />
+        </pattern>
+      </defs>
+      <rect
+        x={1}
+        y={1}
+        width={50}
+        height={70}
+        rx={6}
+        ry={6}
+        fill="url(#card-back)"
+        stroke="#10b981"
+        strokeWidth={0.7}
+      />
+      <rect
+        x={4}
+        y={4}
+        width={44}
+        height={64}
+        rx={4}
+        ry={4}
+        fill="url(#card-dots)"
+        stroke="#0f172a"
+        strokeWidth={0.5}
+      />
+      <rect
+        x={15}
+        y={20}
+        width={22}
+        height={32}
+        rx={6}
+        fill="rgba(16,185,129,0.25)"
+        stroke="rgba(16,185,129,0.6)"
+        strokeWidth={0.8}
+      />
     </svg>
   );
 }
