@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { config } from "./config";
-import type { Card, GameStateWS, Suit, Rank } from "./gameTypes";
+import type { Card, GameStateWS, Suit } from "./gameTypes";
 
 type View = "lobby" | "game";
 
