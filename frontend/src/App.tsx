@@ -475,7 +475,7 @@ function App() {
                 id="nickname"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                placeholder="Ex : Max, Claire..."
+                placeholder="Ex : Nono, Cheblan, Elo, Spider-Man..."
                 style={{
                   width: "100%",
                   padding: "0.5rem 0.75rem",
