@@ -9,6 +9,7 @@ import {
     ChooseTrumpPayload,
     validatePlay,
     playCard,
+    announceBelote
 } from "./game/gameState";
 
 import { Card, PlayerId } from "./game/types";
@@ -90,11 +91,16 @@ interface ChooseTrumpMessage extends BaseMessage {
     payload: ChooseTrumpPayload; // importé depuis gameState
 }
 
+interface AnnounceBeloteMessage extends BaseMessage {
+    type: "announce_belote";
+}
+
 type IncomingMessage =
     | JoinRoomMessage
     | StartGameMessage
     | PlayCardMessage
-    | ChooseTrumpMessage;
+    | ChooseTrumpMessage
+    | AnnounceBeloteMessage;
 
 // --------- Utils envoi ---------
 
@@ -379,6 +385,48 @@ function handleChooseTrumpMessage(client: ClientInfo, message: ChooseTrumpMessag
     broadcastGameState(room);
 }
 
+function handleAnnounceBeloteMessage(client: ClientInfo){
+    if (!client.roomCode){
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'êtes pas dans une room." }
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const room = rooms.get(client.roomCode);
+    if (!room || !room.gameState) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Aucune partie en cours dans cette room." }
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (client.seat === undefined) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'avez pas de siège assigné." }
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const err = announceBelote(room.gameState, client.seat);
+    if (err) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: err },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    broadcastGameState(room);
+}
+
 
 function handleClientDisconnect(clientId: ClientId) {
     const client = clients.get(clientId);
@@ -450,6 +498,9 @@ export function setupWebSocketServer(httpServer: Server) {
                 break;
             case "choose_trump":
                 handleChooseTrumpMessage(client, parsed);
+                break;
+            case "announce_belote":
+                handleAnnounceBeloteMessage(client);
                 break;
             default: {
                 const msg: ErrorMessage = {

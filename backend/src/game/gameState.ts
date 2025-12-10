@@ -36,17 +36,28 @@ export interface GameState {
     currentPlayer: PlayerId;
 
     // Distribution / atout
-    deck: Card[];                  // cartes restantes dans le paquet
+    deck: Card[]; // cartes restantes dans le paquet
     hands: Record<PlayerId, Hand>;
-    turnedCard: Card | null;       // carte retournée au milieu
-    proposedTrump: Suit | null;    // couleur de la retournée
-    trumpSuit?: Suit;              // atout choisi
-    trumpChooser?: PlayerId;       // preneur
-    biddingPlayer: PlayerId | null;   // joueur qui parle
-    passesInCurrentRound: number;     // 0..4
+    turnedCard: Card | null; // carte retournée au milieu
+    proposedTrump: Suit | null; // couleur de la retournée
+    trumpSuit?: Suit; // atout choisi
+    trumpChooser?: PlayerId; // preneur
+    biddingPlayer: PlayerId | null; // joueur qui parle
+    passesInCurrentRound: number; // 0..4
 
     // Pli en cours
     trick: Trick | null;
+
+    // Cartes gagnées par chaque joueur (pour belote)
+    wonCards: Record<PlayerId, Card[]>;
+
+    // Belote / rebelote
+    belote: {
+        holder: PlayerId | null; // joueur qui possède K+Q d'atout
+        announced: boolean; // belote déjà annoncée
+        points: number; // en général 20 pts
+        team: "team0" | "team1" | null; // équipe qui a la belote
+    };
 
     // Scores de la donne
     scores: {
@@ -115,7 +126,7 @@ export function startNewGame(dealer: PlayerId): GameState {
         3: [],
     } as Record<PlayerId, Hand>;
 
-    // 1er passage : 5 cartes par joueur (on ne s'embête pas à faire 3+2)
+    // 1er passage : 5 cartes par joueur
     for (const pid of ALL_PLAYERS) {
         hands[pid] = deck.splice(0, 5);
     }
@@ -124,6 +135,13 @@ export function startNewGame(dealer: PlayerId): GameState {
     const proposedTrump = turnedCard ? turnedCard.suit : null;
 
     const firstToSpeak: PlayerId = ((dealer + 1) % 4) as PlayerId;
+
+    const wonCards: Record<PlayerId, Card[]> = {
+        0: [],
+        1: [],
+        2: [],
+        3: [],
+    } as Record<PlayerId, Card[]>;
 
     return {
         phase: GamePhase.ChoosingTrumpFirstRound,
@@ -138,6 +156,13 @@ export function startNewGame(dealer: PlayerId): GameState {
         biddingPlayer: firstToSpeak,
         passesInCurrentRound: 0,
         trick: null,
+        wonCards,
+        belote: {
+            holder: null,
+            announced: false,
+            points: 20,
+            team: null,
+        },
         scores: {
             team0: 0,
             team1: 0,
@@ -188,7 +213,6 @@ export function chooseTrump(
 
         if (!trumpSuit) return state;
 
-        // Le joueur prend -> on complète les mains et on passe en phase PlayingTricks
         let nextState: GameState = {
             ...state,
             trumpSuit,
@@ -298,7 +322,7 @@ const TRUMP_ORDER: Rank[] = [
     Rank.Jack,
 ];
 
-// Valeurs de points (sans belote/rebelote pour l'instant)
+// Valeurs de points (sans belote/rebelote pour l'instant, on les ajoute à part)
 const NON_TRUMP_POINTS: Record<Rank, number> = {
     [Rank.Seven]: 0,
     [Rank.Eight]: 0,
@@ -388,7 +412,10 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
         // Les deux sont dans la même catégorie (tous les deux atout ou tous les deux couleur demandée)
         // -> compare la force
         const sameTrumpFlag = isTrump(winning.card, trumpSuit); // == challengerIsTrump
-        const winningStrength = rankStrength(winning.card.rank, sameTrumpFlag);
+        const winningStrength = rankStrength(
+            winning.card.rank,
+            sameTrumpFlag
+        );
         const challengerStrength = rankStrength(
             challenger.card.rank,
             sameTrumpFlag
@@ -401,6 +428,8 @@ function computeTrickWinner(trick: Trick, trumpSuit?: Suit): PlayerId {
 
     return winning.player;
 }
+
+// ---------- Règles : fournir / couper / surcouper / défausser ----------
 
 /**
  * Valide si un joueur a le droit de jouer cette carte dans l'état actuel.
@@ -599,12 +628,83 @@ export function validatePlay(
     return null;
 }
 
+// ---------- Belote / rebelote ----------
+
+/**
+ * Annonce de belote :
+ * - vérifie que le joueur possède Dame + Roi d'atout
+ * - ajoute 20 points à son équipe
+ * - ne peut être annoncée qu'une seule fois par donne
+ *
+ * Retourne:
+ *  - null si OK
+ *  - un message d'erreur sinon
+ */
+export function announceBelote(state: GameState, player: PlayerId): string | null {
+    if (state.phase !== GamePhase.PlayingTricks) {
+        return "On ne peut annoncer belote que pendant les plis.";
+    }
+
+    if (!state.trumpSuit) {
+        return "Aucun atout n'est défini pour cette donne.";
+    }
+
+    if (state.belote.announced) {
+        return "La belote a déjà été annoncée.";
+    }
+
+    const trumpSuit = state.trumpSuit;
+
+    // Cartes "possédées" par le joueur : main + cartes déjà gagnées + celles qu'il a posées dans le pli en cours
+    const hand = state.hands[player] ?? [];
+    const won = state.wonCards[player] ?? [];
+    const inCurrentTrick =
+        state.trick?.cards
+            .filter((tc) => tc.player === player)
+            .map((tc) => tc.card) ?? [];
+
+    const allOwned = [...hand, ...won, ...inCurrentTrick];
+
+    const hasQueenTrump = allOwned.some(
+        (c) => c.suit === trumpSuit && c.rank === Rank.Queen
+    );
+    const hasKingTrump = allOwned.some(
+        (c) => c.suit === trumpSuit && c.rank === Rank.King
+    );
+
+    if (!hasQueenTrump || !hasKingTrump) {
+        return "Vous n'avez pas belote (dame et roi d'atout).";
+    }
+
+    const teamKey = player === 0 || player === 2 ? "team0" : "team1";
+
+    state.scores[teamKey] += state.belote.points;
+    state.belote = {
+        holder: player,
+        announced: true,
+        points: state.belote.points,
+        team: teamKey,
+    };
+
+    return null;
+}
+
+// ---------- Joue une carte & 10 de der ----------
 
 /**
  * Joue une carte pour un joueur donné.
  * Supposé : validatePlay a été appelée avant.
+ *
+ * Inclut :
+ *  - attribution des points du pli
+ *  - stockage des cartes gagnées (wonCards)
+ *  - 10 de der sur le dernier pli
  */
-export function playCard(state: GameState, player: PlayerId, card: Card): void {
+export function playCard(
+    state: GameState,
+    player: PlayerId,
+    card: Card
+): void {
     if (state.phase !== GamePhase.PlayingTricks) {
         throw new Error(
             "On ne peut jouer une carte que pendant la phase des plis."
@@ -650,6 +750,13 @@ export function playCard(state: GameState, player: PlayerId, card: Card): void {
     state.trick.winner = winner;
     state.currentPlayer = winner as PlayerId;
 
+    // Stocker les cartes gagnées pour belote
+    const existing = state.wonCards[winner] ?? [];
+    state.wonCards[winner] = [
+        ...existing,
+        ...state.trick.cards.map((tc) => tc.card),
+    ];
+
     // Attribution des points du pli
     const points = trickPoints(state.trick, state.trumpSuit);
     const winnerTeam = winner === 0 || winner === 2 ? "team0" : "team1";
@@ -661,7 +768,7 @@ export function playCard(state: GameState, player: PlayerId, card: Card): void {
     );
 
     if (allHandsEmpty) {
-        // Bonus du dernier pli : 10 points
+        // Bonus du dernier pli : 10 points (10 de der)
         state.scores[winnerTeam] += 10;
         state.phase = GamePhase.Finished;
     }

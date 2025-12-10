@@ -214,6 +214,24 @@ function App() {
     gameState.currentPlayer === mySeat &&
     gameState.phase === "PlayingTricks";
 
+  const canAnnounceBelote =
+    !!gameState &&
+    mySeat !== null &&
+    gameState.phase == "PlayingTricks" &&
+    !!gameState.trumpSuit &&
+    !!gameState.belote.announced;
+
+  const handleAnnounceBelote = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!canAnnounceBelote) return;
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "announce_belote",
+      })
+    );
+  };
+
   const handlePlayCard = (card: Card) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (!gameState || mySeat === null || !isMyTurn) return;
@@ -983,6 +1001,32 @@ function App() {
               )}
             </p>
 
+            {gameState && canAnnounceBelote && (
+              <div
+                style={{
+                  margin: "0 0 0.35rem 0.4rem",
+                  fontSize: "0.8rem",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={handleAnnounceBelote}
+                  style={{
+                    padding: "0.3rem 0.8rem",
+                    borderRadius: "9999px",
+                    border: "1px solid rgba(250,204,21,0.8)",
+                    background:
+                      "linear-gradient(135deg, #facc15, #eab308, #facc15)",
+                    color: "#111827",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  🎺 Belote !
+                </button>
+              </div>
+            )}
+
             <div
               style={{
                 position: "relative",
@@ -1188,6 +1232,21 @@ function App() {
                 Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
                 <strong>{gameState.scores.team1}</strong> pts
               </p>
+              {gameState.belote.announced && (
+                <p
+                  style={{
+                    margin: "0.25rem 0 0",
+                    fontSize: "0.8rem",
+                    color: "#fde68a",
+                  }}
+                >
+                  🎖 Belote annoncée par{" "}
+                  {gameState.belote.holder !== null &&
+                    shortSeatLabel(gameState.belote.holder)}{" "}
+                  (+{gameState.belote.points} pts)
+                </p>
+              )}
+
             </div>
           )}
 

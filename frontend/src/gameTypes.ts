@@ -42,9 +42,16 @@ export interface GameStateWS {
         team0: number;
         team1: number;
     };
+
+    belote: {
+        holder: number | null;
+        announced: boolean;
+        points: number;
+        team: "team0" | "team1" | null;
+    };
 }
 
-// Pour l'endpoint /debug/deal si tu l'utilises encore
+// Pour l'endpoint /debug/deal
 export interface DealResponse {
     hands: Record<string, Card[]>;
 }
