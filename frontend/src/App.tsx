@@ -324,6 +324,8 @@ function App() {
     return `J${seat + 1}`;
   }
 
+  const trumpChooserSeat = gameState?.trumpChooser ?? null;
+
   function cardPositionForPlayerSeat(seat: number): TablePosition {
     return seatToTablePosition(seat) ?? "top";
   }
@@ -645,6 +647,10 @@ function App() {
                   playersByPosition.top?.seat === gameState.currentPlayer
                 )
               }
+              isTrumpChooser={
+                playersByPosition.top?.seat !== null &&
+                playersByPosition.top?.seat === trumpChooserSeat
+              }
               cardsCount={remainingCardsForSeat(
                 playersByPosition.top?.seat ?? null
               )}
@@ -658,6 +664,10 @@ function App() {
                   playersByPosition.left?.seat === gameState.currentPlayer
                 )
               }
+              isTrumpChooser={
+                playersByPosition.left?.seat !== null &&
+                playersByPosition.left?.seat === trumpChooserSeat
+              }
               cardsCount={remainingCardsForSeat(
                 playersByPosition.left?.seat ?? null
               )}
@@ -670,6 +680,10 @@ function App() {
                   gameState &&
                   playersByPosition.right?.seat === gameState.currentPlayer
                 )
+              }
+              isTrumpChooser={
+                playersByPosition.right?.seat !== null &&
+                playersByPosition.right?.seat === trumpChooserSeat
               }
               cardsCount={remainingCardsForSeat(
                 playersByPosition.right?.seat ?? null
@@ -703,6 +717,10 @@ function App() {
                 )
               }
               isSelf={true}
+              isTrumpChooser={
+                playersByPosition.bottom?.seat !== null &&
+                playersByPosition.bottom?.seat === trumpChooserSeat
+              }
               cardsCount={remainingCardsForSeat(
                 playersByPosition.bottom?.seat ?? null
               )}
@@ -711,48 +729,39 @@ function App() {
 
           {/* OVERLAY DE PRISE / ENCHÈRES */}
           {gameState && (isFirstRound || isSecondRound) && (
-            <div className="pointer-events-auto absolute left-1/2 top-1/2 z-10 w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-xl border border-slate-400/70 bg-slate-950/95 px-5 py-4 text-center text-sm shadow-[0_18px_35px_-24px_rgba(0,0,0,1)]">
-              {gameState.turnedCard && (
-                <div className="mb-3 space-y-1">
-                  <span className="block text-xs uppercase tracking-wide text-slate-400">
-                    Carte retournée
-                  </span>
-                  <div className="mx-auto inline-block">
-                    <CardSvg card={gameState.turnedCard} small />
-                  </div>
-                </div>
-              )}
+            <div className="pointer-events-auto absolute left-1/2 top-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-400/70 bg-slate-950/95 px-6 py-6 text-center text-sm shadow-[0_18px_35px_-24px_rgba(0,0,0,1)]">
+              <DeckChoiceVisual turnedCard={gameState.turnedCard} />
 
               {isFirstRound && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <p className="text-sm text-slate-200">
                     {isBiddingPlayer ? (
                       <>
-                        Voulez-vous prendre à {" "}
+                        Voulez-vous prendre à{" "}
                         <strong>{gameState.proposedTrump}</strong> ?
                       </>
                     ) : (
                       <>
-                        En attente de {" "}
+                        En attente de{" "}
                         {shortSeatLabel(gameState.biddingPlayer!)} (1er tour)…
                       </>
                     )}
                   </p>
                   {isBiddingPlayer && (
-                    <div className="flex justify-center gap-2 text-sm">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={handleTakeFirstRound}
-                        className="rounded-full bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-1.5 font-semibold text-white"
+                        className="rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-4 py-3 text-base font-semibold text-white shadow-[0_20px_40px_-18px_rgba(16,185,129,0.8)] transition hover:brightness-110"
                       >
-                        Prendre
+                        PRENDRE
                       </button>
                       <button
                         type="button"
                         onClick={handlePass}
-                        className="rounded-full border border-slate-500/70 px-4 py-1.5 text-slate-200 transition hover:border-slate-300"
+                        className="rounded-2xl border border-slate-500/70 px-4 py-3 text-base font-semibold text-slate-200 transition hover:border-slate-300"
                       >
-                        Passer
+                        PASSER
                       </button>
                     </div>
                   )}
@@ -760,43 +769,43 @@ function App() {
               )}
 
               {isSecondRound && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <p className="text-sm text-slate-200">
                     {isBiddingPlayer ? (
                       <>Choisissez une couleur d&apos;atout ou passez :</>
                     ) : (
                       <>
-                        En attente de {" "}
+                        En attente de{" "}
                         {shortSeatLabel(gameState.biddingPlayer!)} (2ᵉ tour)…
                       </>
                     )}
                   </p>
 
                   {isBiddingPlayer && (
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {SUIT_SYMBOLS.filter((s) => s !== gameState.proposedTrump).map(
-                        (suit) => (
-                          <button
-                            key={suit}
-                            type="button"
-                            onClick={() => handleTakeSecondRound(suit)}
-                            className={cx(
-                              "rounded-full border px-3 py-1 text-sm",
-                              suit === "♥" || suit === "♦"
-                                ? "border-rose-300/60 text-rose-200"
-                                : "border-slate-400/70 text-slate-200"
-                            )}
-                          >
-                            {suit}
-                          </button>
-                        )
-                      )}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {SUIT_SYMBOLS.filter(
+                        (s) => s !== gameState.proposedTrump
+                      ).map((suit) => (
+                        <button
+                          key={suit}
+                          type="button"
+                          onClick={() => handleTakeSecondRound(suit)}
+                          className={cx(
+                            "rounded-2xl border px-4 py-3 text-base font-semibold transition",
+                            suit === "♥" || suit === "♦"
+                              ? "border-rose-300/60 text-rose-200 hover:border-rose-300"
+                              : "border-cyan-300/60 text-cyan-100 hover:border-cyan-200"
+                          )}
+                        >
+                          Atout {suit}
+                        </button>
+                      ))}
                       <button
                         type="button"
                         onClick={handlePass}
-                        className="rounded-full border border-slate-500/70 px-3 py-1 text-sm text-slate-200"
+                        className="rounded-2xl border border-slate-500/70 px-4 py-3 text-base font-semibold text-slate-200 transition hover:border-slate-300"
                       >
-                        Passer
+                        PASSER
                       </button>
                     </div>
                   )}
@@ -1080,8 +1089,10 @@ function SeatBanner(props: {
   isCurrent: boolean;
   isSelf?: boolean;
   cardsCount?: number;
+  isTrumpChooser?: boolean;
 }) {
-  const { position, player, isCurrent, isSelf, cardsCount } = props;
+  const { position, player, isCurrent, isSelf, cardsCount, isTrumpChooser } =
+    props;
   const col = position === "left" ? 1 : position === "right" ? 3 : 2;
   const row = position === "top" ? 1 : position === "bottom" ? 3 : 2;
 
@@ -1109,7 +1120,8 @@ function SeatBanner(props: {
         "inline-flex flex-col items-center gap-1 rounded-full border px-3 py-2 text-xs text-white transition",
         isCurrent
           ? "border-emerald-400/80 bg-emerald-500/20 shadow-[0_0_0_1px_rgba(16,185,129,0.4)]"
-          : "border-slate-900/80 bg-slate-900/70"
+          : "border-slate-900/80 bg-slate-900/70",
+        isTrumpChooser && "ring-2 ring-amber-300/70"
       )}
       style={{ gridColumn: col, gridRow: row }}
     >
@@ -1121,6 +1133,11 @@ function SeatBanner(props: {
           )}
         />
         <span>{label}</span>
+        {isTrumpChooser && (
+          <span className="flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-500/20 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.4em] text-amber-100">
+            👑 Preneur
+          </span>
+        )}
       </div>
       {!isSelf && (cardsCount ?? 0) > 0 && (
         <CardBackFan count={cardsCount ?? 0} />
@@ -1191,14 +1208,14 @@ function TrickCardView(props: {
 
 function CardBackFan(props: { count: number }) {
   const { count } = props;
-  const cardsToShow = Math.min(5, count);
+  const cardsToShow = Math.min(7, count);
   const cardsArray = Array.from({ length: cardsToShow });
-  const angleSpread = 14;
+  const angleSpread = 12;
   const startAngle = -((cardsToShow - 1) / 2) * angleSpread;
 
   return (
     <div className="relative mt-1 flex flex-col items-center">
-      <div className="relative h-12 w-16">
+      <div className="relative h-16 w-24">
         {cardsArray.map((_, idx) => {
           const angle = startAngle + idx * angleSpread;
           return (
@@ -1206,11 +1223,11 @@ function CardBackFan(props: { count: number }) {
               key={idx}
               className="absolute left-1/2 top-1/2"
               style={{
-                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-4px)`,
+                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-6px)`,
                 zIndex: idx,
               }}
             >
-              <CardBackSvg variant="mini" />
+              <CardBackSvg variant="fan" />
             </div>
           );
         })}
@@ -1218,6 +1235,41 @@ function CardBackFan(props: { count: number }) {
       <span className="mt-1 text-[0.6rem] uppercase tracking-[0.4em] text-slate-200">
         {count}
       </span>
+    </div>
+  );
+}
+
+function DeckChoiceVisual(props: { turnedCard: Card | null }) {
+  const { turnedCard } = props;
+  const stack = Array.from({ length: 4 });
+
+  return (
+    <div className="mb-5 flex flex-col items-center gap-3">
+      <div className="relative flex items-center justify-center">
+        <div className="relative h-28 w-36">
+          {stack.map((_, idx) => (
+            <div
+              key={idx}
+              className="absolute left-1/2 top-1/2"
+              style={{
+                transform: `translate(-50%, -50%) rotate(${idx * 4}deg) translateY(${
+                  -idx * 3
+                }px)`,
+              }}
+            >
+              <CardBackSvg variant="stack" />
+            </div>
+          ))}
+        </div>
+        {turnedCard && (
+          <div className="-ml-8 rotate-3">
+            <CardSvg card={turnedCard} variant="trick" />
+          </div>
+        )}
+      </div>
+      <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+        Carte proposée
+      </p>
     </div>
   );
 }
@@ -1328,11 +1380,12 @@ function CardSvg(props: {
   );
 }
 
-function CardBackSvg(props: { variant?: "mini" | "stack" }) {
+function CardBackSvg(props: { variant?: "mini" | "stack" | "fan" }) {
   const { variant = "mini" } = props;
   const sizeMap = {
     mini: { width: 34, height: 50 },
     stack: { width: 52, height: 72 },
+    fan: { width: 48, height: 68 },
   } as const;
   const { width, height } = sizeMap[variant];
 
