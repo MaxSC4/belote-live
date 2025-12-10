@@ -29,6 +29,13 @@ export interface GameStateWS {
     dealer: number;
     currentPlayer: number;
 
+    matchScores: {
+        team0: number,
+        team1: number
+    }
+
+    dealNumber: number;
+
     trumpSuit: Suit | null;
     proposedTrump: Suit | null;
     turnedCard: Card | null;

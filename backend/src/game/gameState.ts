@@ -35,6 +35,9 @@ export interface GameState {
     dealer: PlayerId;
     currentPlayer: PlayerId;
 
+    // Numéro de donne (manche) dans la partie
+    dealNumber: number;
+
     // Distribution / atout
     deck: Card[]; // cartes restantes dans le paquet
     hands: Record<PlayerId, Hand>;
@@ -168,6 +171,7 @@ export function startNewGame(dealer: PlayerId): GameState {
             team0: 0,
             team1: 0,
         },
+        dealNumber: 1
     };
 }
 

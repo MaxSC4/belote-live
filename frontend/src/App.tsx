@@ -327,6 +327,12 @@ function App() {
   const currentPhase = gameState?.phase ?? "—";
   const trumpSymbol = gameState?.trumpSuit ?? null;
 
+  const currentDealNumber = gameState?.dealNumber ?? 1;
+
+  const matchTeam0 = gameState?.matchScores?.team0 ?? 0;
+  const matchTeam1 = gameState?.matchScores?.team1 ?? 0;
+
+
   function seatToTablePosition(seat: number | null): TablePosition | null {
     if (seat === null) return null;
     if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
@@ -687,10 +693,13 @@ function App() {
             <p
               style={{
                 margin: "0.1rem 0 0",
-                fontSize: "0.8rem",
+                fontSize: "0.85rem",
                 color: "#9ca3af",
               }}
             >
+              Manche&nbsp;
+              <strong style={{ color: "#facc15" }}>{currentDealNumber}</strong>
+              {" · "}
               Atout :{" "}
               <strong
                 style={{
@@ -701,8 +710,9 @@ function App() {
                 }}
               >
                 {trumpSymbol ?? "—"}
-              </strong>{" "}
-              • Phase : <strong>{currentPhase}</strong>
+              </strong>
+              {" · "}
+              Phase : <strong>{currentPhase}</strong>
             </p>
           )}
         </div>
@@ -1300,66 +1310,83 @@ function App() {
             })}
           </ul>
 
-          {gameState && (
-            <div
-              style={{
-                marginTop: "0.4rem",
-                padding: "0.4rem 0.5rem 0.35rem",
-                borderRadius: "0.6rem",
-                border: "1px solid rgba(148,163,184,0.45)",
-                background: "rgba(15,23,42,0.98)",
-              }}
-            >
-              <h3
+            {gameState && (
+              <div
                 style={{
-                  margin: 0,
-                  marginBottom: "0.2rem",
-                  fontSize: "0.9rem",
+                  marginTop: "0.4rem",
+                  padding: "0.4rem 0.5rem 0.35rem",
+                  borderRadius: "0.6rem",
+                  border: "1px solid rgba(148,163,184,0.45)",
+                  background: "rgba(15,23,42,0.98)",
                 }}
               >
-                Scores
-              </h3>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "0.82rem",
-                  color: "#e5e7eb",
-                }}
-              >
-                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
-                <strong>{gameState.scores.team0}</strong> pts
-              </p>
-              <p
-                style={{
-                  margin: "0.1rem 0 0",
-                  fontSize: "0.82rem",
-                  color: "#e5e7eb",
-                }}
-              >
-                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
-                <strong>{gameState.scores.team1}</strong> pts
-              </p>
-              {gameState.belote.stage > 0 && (
-                <p
+                <h3
                   style={{
-                    margin: "0.25rem 0 0",
-                    fontSize: "0.8rem",
-                    color: "#fde68a",
+                    margin: 0,
+                    marginBottom: "0.2rem",
+                    fontSize: "0.9rem",
                   }}
                 >
-                  🎖{" "}
-                  {gameState.belote.stage === 1
-                    ? "Belote annoncée par "
-                    : "Belote & rebelote annoncées par "}
-                  {gameState.belote.holder !== null &&
-                    shortSeatLabel(gameState.belote.holder)}
-                  {gameState.belote.stage === 2 &&
-                    ` (+${gameState.belote.points} pts)`}
+                  Scores (donne)
+                </h3>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.82rem",
+                    color: "#e5e7eb",
+                  }}
+                >
+                  Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
+                  <strong>{gameState.scores.team0}</strong> pts
                 </p>
-              )}
-            </div>
-          )}
+                <p
+                  style={{
+                    margin: "0.1rem 0 0",
+                    fontSize: "0.82rem",
+                    color: "#e5e7eb",
+                  }}
+                >
+                  Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
+                  <strong>{gameState.scores.team1}</strong> pts
+                </p>
 
+                <h3
+                  style={{
+                    margin: "0.6rem 0 0.2rem",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  Scores cumulés (manche)
+                </h3>
+                <p style={{ margin: "0.1rem 0", color: "#facc15", fontSize: "0.82rem" }}>
+                  Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :{" "}
+                  <strong>{matchTeam0}</strong> pts
+                </p>
+                <p style={{ margin: "0.1rem 0", color: "#facc15", fontSize: "0.82rem" }}>
+                  Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
+                  <strong>{matchTeam1}</strong> pts
+                </p>
+
+                {gameState.belote.stage > 0 && (
+                  <p
+                    style={{
+                      margin: "0.25rem 0 0",
+                      fontSize: "0.8rem",
+                      color: "#fde68a",
+                    }}
+                  >
+                    🎖{" "}
+                    {gameState.belote.stage === 1
+                      ? "Belote annoncée par "
+                      : "Belote & rebelote annoncées par "}
+                    {gameState.belote.holder !== null &&
+                      shortSeatLabel(gameState.belote.holder)}
+                    {gameState.belote.stage === 2 &&
+                      ` (+${gameState.belote.points} pts)`}
+                  </p>
+                )}
+              </div>
+            )}
           {wsError && (
             <div
               style={{

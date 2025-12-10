@@ -28,8 +28,15 @@ interface Room {
     code: string;
     clients: Set<ClientId>;
     createdAt: number;
-    seats: (ClientId | null)[]; // index = seat (0..3)
+    seats: (ClientId | null)[];
     gameState?: GameState;
+
+    matchScores: {
+        team0: number;
+        team1: number;
+    };
+
+    dealNumber: number;
 }
 
 const clients = new Map<ClientId, ClientInfo>();
@@ -75,9 +82,17 @@ interface RoomUpdateMessage extends BaseMessage {
 interface GameStateMessage extends BaseMessage {
     type: "game_state";
     payload: {
-        state: GameState;
+        state: GameState & {
+            matchScores: {
+                team0: number;
+                team1: number;
+            };
+
+            dealNumber: number;
+        };
     };
 }
+
 
 interface ErrorMessage extends BaseMessage {
     type: "error";
@@ -104,7 +119,7 @@ type IncomingMessage =
 
 // --------- Utils envoi ---------
 
-function send(ws: WebSocket, message: BaseMessage) {
+function send(ws: WebSocket, message: BaseMessage | any) {
     ws.send(JSON.stringify(message));
 }
 
@@ -144,7 +159,11 @@ function broadcastGameState(room: Room) {
     const message: GameStateMessage = {
         type: "game_state",
         payload: {
-        state: room.gameState,
+            state: {
+                ...room.gameState,
+                matchScores: room.matchScores,
+                dealNumber: room.dealNumber,
+            },
         },
     };
 
@@ -152,10 +171,11 @@ function broadcastGameState(room: Room) {
         const client = clients.get(clientId);
         if (!client) continue;
         if (client.ws.readyState === WebSocket.OPEN) {
-        send(client.ws, message);
+            send(client.ws, message);
         }
     }
 }
+
 
 // --------- Handlers ---------
 
@@ -175,10 +195,12 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
     let room = rooms.get(roomCode);
     if (!room) {
         room = {
-        code: roomCode,
-        clients: new Set(),
-        createdAt: Date.now(),
-        seats: [null, null, null, null],
+            code: roomCode,
+            clients: new Set(),
+            createdAt: Date.now(),
+            seats: [null, null, null, null],
+            matchScores: { team0: 0, team1: 0 },
+            dealNumber: 0,
         };
         rooms.set(roomCode, room);
     }
@@ -244,41 +266,57 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
 
 function handleStartGameMessage(client: ClientInfo) {
     if (!client.roomCode) {
-        const error: ErrorMessage = {
-        type: "error",
-        payload: { message: "Vous n'êtes pas dans une room." },
-        };
-        send(client.ws, error);
-        return;
+        return send(client.ws, {
+            type: "error",
+            payload: { message: "Vous n'êtes pas dans une room." },
+        });
     }
 
     const room = rooms.get(client.roomCode);
     if (!room) {
-        const error: ErrorMessage = {
-        type: "error",
-        payload: { message: "Room introuvable côté serveur." },
-        };
-        send(client.ws, error);
-        return;
+        return send(client.ws, {
+            type: "error",
+            payload: { message: "Room introuvable côté serveur." },
+        });
     }
 
     if (room.clients.size !== 4) {
-        const error: ErrorMessage = {
-        type: "error",
-        payload: { message: "Il faut 4 joueurs pour lancer la partie." },
-        };
-        send(client.ws, error);
-        return;
+        return send(client.ws, {
+            type: "error",
+            payload: { message: "Il faut 4 joueurs pour lancer la partie." },
+        });
     }
 
-    // Pour l'instant, donneur fixe = siège 0
-    const dealer: PlayerId = 0;
-    room.gameState = startNewGame(dealer);
+    // Empêcher de relancer une donne déjà en cours
+    if (room.gameState && room.gameState.phase !== GamePhase.Finished) {
+        return send(client.ws, {
+            type: "error",
+            payload: { message: "Une donne est déjà en cours." },
+        });
+    }
 
+    // Donneur : 0 la première fois, puis rotation
+    const previousDealer = room.gameState?.dealer ?? 0;
+    const dealer: PlayerId =
+        room.dealNumber === 0
+            ? 0
+            : (((previousDealer + 1) % 4) as PlayerId);
+
+    // Nouvelle donne
+    const newState = startNewGame(dealer);
+
+    // Ajouter dealNumber au gameState SANS modifier startNewGame
+    room.dealNumber += 1;
+    newState["dealNumber"] = room.dealNumber;
+
+    // Stocker la nouvelle donne
+    room.gameState = newState;
     broadcastGameState(room);
-    }
+}
 
-    function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
+
+
+function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
     if (!client.roomCode) {
         const error: ErrorMessage = {
         type: "error",
@@ -339,6 +377,13 @@ function handleStartGameMessage(client: ClientInfo) {
 
     try {
         playCard(state, client.seat, message.payload.card);
+
+        if (state.phase as GamePhase === GamePhase.Finished) {
+            const ms = room.matchScores;
+            ms.team0 += state.scores.team0;
+            ms.team1 += state.scores.team1;
+        }
+
         broadcastGameState(room);
     } catch (e: any) {
         const error: ErrorMessage = {
