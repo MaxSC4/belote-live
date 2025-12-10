@@ -1125,23 +1125,25 @@ function SeatBanner(props: {
       )}
       style={{ gridColumn: col, gridRow: row }}
     >
-      <div className="flex items-center gap-2">
-        <span
-          className={cx(
-            "h-1.5 w-1.5 rounded-full",
-            isCurrent ? "bg-emerald-400" : "bg-slate-500"
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={cx(
+              "h-1.5 w-1.5 rounded-full",
+              isCurrent ? "bg-emerald-400" : "bg-slate-500"
+            )}
+          />
+          <span>{label}</span>
+          {isTrumpChooser && (
+            <span className="flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-500/20 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.4em] text-amber-100">
+              👑 Preneur
+            </span>
           )}
-        />
-        <span>{label}</span>
-        {isTrumpChooser && (
-          <span className="flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-500/20 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.4em] text-amber-100">
-            👑 Preneur
-          </span>
+        </div>
+        {!isSelf && (cardsCount ?? 0) > 0 && (
+          <CardBackFan count={cardsCount ?? 0} />
         )}
       </div>
-      {!isSelf && (cardsCount ?? 0) > 0 && (
-        <CardBackFan count={cardsCount ?? 0} />
-      )}
     </div>
   );
 }
@@ -1214,7 +1216,7 @@ function CardBackFan(props: { count: number }) {
   const startAngle = -((cardsToShow - 1) / 2) * angleSpread;
 
   return (
-    <div className="relative mt-1 flex flex-col items-center">
+    <div className="relative mt-1 flex flex-col items-center gap-1">
       <div className="relative h-16 w-24">
         {cardsArray.map((_, idx) => {
           const angle = startAngle + idx * angleSpread;
@@ -1232,7 +1234,7 @@ function CardBackFan(props: { count: number }) {
           );
         })}
       </div>
-      <span className="mt-1 text-[0.6rem] uppercase tracking-[0.4em] text-slate-200">
+      <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-200">
         {count}
       </span>
     </div>
