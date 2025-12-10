@@ -47,45 +47,45 @@ type ChooseTrumpMessageWS = {
   payload: ChooseTrumpPayloadWS;
 };
 
-function sortHandBySuitColor(
-  hand: Card[],
-  trumpSuit: SuitSymbol | null
-): Card[] {
-    const isBlack = (s: SuitSymbol) => s === "♣" || s === "♠";
-    const allSuits: SuitSymbol[] = ["♣", "♦", "♠", "♥"];
+function sortHandBySuitColor(hand: Card[], trumpSuit: Suit | null): Card[] {
+  // Noir: ♣, ♠ / Rouge: ♦, ♥
+  const isBlack = (s: Suit) => s === "♣" || s === "♠";
+  const allSuits: Suit[] = ["♣", "♦", "♠", "♥"];
 
-    const nonTrumpSuits = trumpSuit
-      ? allSuits.filter((s) => s !== trumpSuit)
-      : allSuits;
+  const nonTrumpSuits = trumpSuit
+    ? allSuits.filter((s) => s !== trumpSuit)
+    : allSuits;
 
-    const blackNonTrumps = nonTrumpSuits.filter(isBlack);
-    const redNonTrumps = nonTrumpSuits.filter((s) => !isBlack(s));
+  const blackNonTrumps = nonTrumpSuits.filter(isBlack);
+  const redNonTrumps = nonTrumpSuits.filter((s) => !isBlack(s));
 
-    const suitOrder: SuitSymbol[] = [];
-    let bi = 0;
-    let ri = 0;
-    while (bi < blackNonTrumps.length || ri < redNonTrumps.length) {
-      if (bi < blackNonTrumps.length){
-        suitOrder.push(blackNonTrumps[bi++]);
-      }
-      if (ri < redNonTrumps.length){
-        suitOrder.push(redNonTrumps[ri++])
-      }
+  // Alterner noir / rouge / noir / rouge
+  const suitOrder: Suit[] = [];
+  let bi = 0;
+  let ri = 0;
+  while (bi < blackNonTrumps.length || ri < redNonTrumps.length) {
+    if (bi < blackNonTrumps.length) {
+      suitOrder.push(blackNonTrumps[bi++]);
     }
-
-    if (trumpSuit) {
-      suitOrder.push(trumpSuit);
+    if (ri < redNonTrumps.length) {
+      suitOrder.push(redNonTrumps[ri++]);
     }
+  }
 
-    const rankOrder: Rank[] = ["7", "8", "9", "J", "Q", "K", "10", "A"];
-    const rankValue = (rank: Rank) => rankOrder.indexOf(rank);
+  // Atout à la fin (à droite)
+  if (trumpSuit) {
+    suitOrder.push(trumpSuit);
+  }
 
-    return [...hand].sort((a, b) => {
-      const sa = suitOrder.indexOf(a.suit as SuitSymbol);
-      const sb = suitOrder.indexOf(b.suit as SuitSymbol);
-      if (sa !== sb) return sa - sb;
-      return rankValue(a.rank) - rankValue(b.rank);
-    });
+  const rankOrder: Card["rank"][] = ["7", "8", "9", "J", "Q", "K", "10", "A"];
+  const rankValue = (rank: Card["rank"]) => rankOrder.indexOf(rank);
+
+  return [...hand].sort((a, b) => {
+    const sa = suitOrder.indexOf(a.suit);
+    const sb = suitOrder.indexOf(b.suit);
+    if (sa !== sb) return sa - sb;
+    return rankValue(a.rank) - rankValue(b.rank);
+  });
 }
 
 // Styles globaux pour les animations
@@ -121,6 +121,14 @@ const GLOBAL_STYLES = `
   from { opacity: 0; }
   to   { opacity: 0.75; }
 }
+@keyframes hand-shuffle {
+  0% { transform: translateY(0); }
+  20% { transform: translateY(-4px); }
+  40% { transform: translateY(4px); }
+  60% { transform: translateY(-2px); }
+  80% { transform: translateY(2px); }
+  100% { transform: translateY(0); }
+}
 `;
 
 function App() {
@@ -147,6 +155,9 @@ function App() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [displayHand, setDisplayHand] = useState<Card[]>([]);
   const prevHandRef = useRef<Card[]>([]);
+
+  // Tri
+  const [isSorting, setIsSorting] = useState(false);
 
   // Injecter les keyframes une fois
   useEffect(() => {
@@ -250,25 +261,34 @@ function App() {
   const mySeat =
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
-  const fullHand: Card[] = 
+  const fullHand: Card[] =
     gameState && mySeat !== null
       ? gameState.hands[String(mySeat)] || []
       : [];
 
-  const showSortButton = fullHand.length === 8;
-
+  const showSortButton =
+    !!gameState &&
+    gameState.phase === "PlayingTricks" &&
+    fullHand.length > 0;
   const isMyTurn =
     gameState &&
     mySeat !== null &&
     gameState.currentPlayer === mySeat &&
     gameState.phase === "PlayingTricks";
 
+  const beloteStage = gameState?.belote.stage ?? 0;
+
   const canAnnounceBelote =
-    gameState &&
+    !!gameState &&
     mySeat !== null &&
-    gameState.phase == "PlayingTricks" &&
-    gameState.trumpSuit &&
-    gameState.belote.announced;
+    gameState.phase === "PlayingTricks" &&
+    !!gameState.trumpSuit &&
+    beloteStage < 2 &&
+    (beloteStage === 0 || gameState.belote.holder === mySeat);
+
+  const beloteButtonLabel =
+    beloteStage === 0 ? "🎺 Belote !" : "🎺 Rebelote !";
+
 
   const handleAnnounceBelote = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -282,12 +302,15 @@ function App() {
   };
 
   const handleSortHand = () => {
-    if (!gameState) return;
+    if (!gameState || mySeat === null) return;
 
+    setIsSorting(true);
     setDisplayHand((current) =>
       sortHandBySuitColor(current, gameState.trumpSuit ?? null)
     );
+    setTimeout(() => setIsSorting(false), 350);
   };
+
 
   const handlePlayCard = (card: Card) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -408,7 +431,9 @@ function App() {
     }
 
     // Fallback (connexion en cours de donne, reconnection, etc.)
-    setDisplayHand(full);
+    if (full.length !== prev.length) {
+      setDisplayHand(full);
+    }
     prevHandRef.current = full;
   }, [gameState, mySeat]);
 
@@ -1082,7 +1107,7 @@ function App() {
                     cursor: "pointer",
                   }}
                 >
-                  🎺 Belote !
+                  {beloteButtonLabel}
                 </button>
               )}
 
@@ -1105,12 +1130,16 @@ function App() {
               )}
             </div>
 
+
             <div
               style={{
                 position: "relative",
                 height: "6.8rem",
                 maxWidth: "100%",
                 margin: "0 auto",
+                animation: isSorting
+                  ? "hand-shuffle 0.35s ease-out"
+                  : "none",
               }}
             >
               {displayHand.map((card, index) => {
@@ -1310,7 +1339,7 @@ function App() {
                 Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :{" "}
                 <strong>{gameState.scores.team1}</strong> pts
               </p>
-              {gameState.belote.announced && (
+              {gameState.belote.stage > 0 && (
                 <p
                   style={{
                     margin: "0.25rem 0 0",
@@ -1318,13 +1347,16 @@ function App() {
                     color: "#fde68a",
                   }}
                 >
-                  🎖 Belote annoncée par{" "}
+                  🎖{" "}
+                  {gameState.belote.stage === 1
+                    ? "Belote annoncée par "
+                    : "Belote & rebelote annoncées par "}
                   {gameState.belote.holder !== null &&
-                    shortSeatLabel(gameState.belote.holder)}{" "}
-                  (+{gameState.belote.points} pts)
+                    shortSeatLabel(gameState.belote.holder)}
+                  {gameState.belote.stage === 2 &&
+                    ` (+${gameState.belote.points} pts)`}
                 </p>
               )}
-
             </div>
           )}
 

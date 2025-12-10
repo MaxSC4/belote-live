@@ -53,11 +53,12 @@ export interface GameState {
 
     // Belote / rebelote
     belote: {
-        holder: PlayerId | null; // joueur qui possède K+Q d'atout
-        announced: boolean; // belote déjà annoncée
-        points: number; // en général 20 pts
-        team: "team0" | "team1" | null; // équipe qui a la belote
+        holder: PlayerId | null;
+        stage: 0 | 1 | 2; // 0 = rien, 1 = belote annoncée, 2 = belote + rebelote annoncées
+        points: number;   // 20
+        team: "team0" | "team1" | null;
     };
+
 
     // Scores de la donne
     scores: {
@@ -159,7 +160,7 @@ export function startNewGame(dealer: PlayerId): GameState {
         wonCards,
         belote: {
             holder: null,
-            announced: false,
+            stage: 0,
             points: 20,
             team: null,
         },
@@ -640,28 +641,40 @@ export function validatePlay(
  *  - null si OK
  *  - un message d'erreur sinon
  */
-export function announceBelote(state: GameState, player: PlayerId): string | null {
+export function announceBelote(
+    state: GameState,
+    player: PlayerId
+): string | null {
     if (state.phase !== GamePhase.PlayingTricks) {
-        return "On ne peut annoncer belote que pendant les plis.";
+        return "On ne peut annoncer belote/rebelote que pendant les plis.";
     }
 
     if (!state.trumpSuit) {
         return "Aucun atout n'est défini pour cette donne.";
     }
 
-    if (state.belote.announced) {
-        return "La belote a déjà été annoncée.";
-    }
-
     const trumpSuit = state.trumpSuit;
 
-    // Cartes "possédées" par le joueur : main + cartes déjà gagnées + celles qu'il a posées dans le pli en cours
+    const trick = state.trick;
+    if (!trick || trick.cards.length === 0) {
+        return "Vous pouvez annoncer belote/rebelote uniquement en jouant Dame ou Roi d'atout.";
+    }
+
+    const last = trick.cards[trick.cards.length - 1];
+    if (
+        last.player !== player ||
+        last.card.suit !== trumpSuit ||
+        (last.card.rank !== Rank.Queen && last.card.rank !== Rank.King)
+    ) {
+        return "Vous pouvez annoncer belote/rebelote uniquement en jouant Dame ou Roi d'atout.";
+    }
+
+    // Cartes possédées : main + cartes déjà gagnées + cartes jouées dans le pli actuel
     const hand = state.hands[player] ?? [];
     const won = state.wonCards[player] ?? [];
-    const inCurrentTrick =
-        state.trick?.cards
-            .filter((tc) => tc.player === player)
-            .map((tc) => tc.card) ?? [];
+    const inCurrentTrick = trick.cards
+        .filter((tc) => tc.player === player)
+        .map((tc) => tc.card);
 
     const allOwned = [...hand, ...won, ...inCurrentTrick];
 
@@ -678,16 +691,34 @@ export function announceBelote(state: GameState, player: PlayerId): string | nul
 
     const teamKey = player === 0 || player === 2 ? "team0" : "team1";
 
-    state.scores[teamKey] += state.belote.points;
-    state.belote = {
-        holder: player,
-        announced: true,
-        points: state.belote.points,
-        team: teamKey,
-    };
+    // Étapes :
+    //  - stage 0 -> Belote ! (pas encore de points)
+    //  - stage 1 -> Rebelote ! (+20 pts)
+    //  - stage 2 -> déjà fait
+    if (state.belote.stage === 0) {
+        // Belote !
+        state.belote = {
+            holder: player,
+            stage: 1,
+            points: state.belote.points,
+            team: teamKey,
+        };
+        return null;
+    }
 
-    return null;
+    if (state.belote.stage === 1) {
+        if (state.belote.holder !== player) {
+            return "La belote appartient déjà à un autre joueur.";
+        }
+        // Rebelote ! -> ajout des 20 points
+        state.scores[teamKey] += state.belote.points;
+        state.belote.stage = 2;
+        return null;
+    }
+
+    return "Belote et rebelote ont déjà été annoncées.";
 }
+
 
 // ---------- Joue une carte & 10 de der ----------
 

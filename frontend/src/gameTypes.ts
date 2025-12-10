@@ -45,7 +45,7 @@ export interface GameStateWS {
 
     belote: {
         holder: number | null;
-        announced: boolean;
+        stage: 0 | 1 | 2;
         points: number;
         team: "team0" | "team1" | null;
     };
