@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { config } from "./config";
-import type { Card, GameStateWS, Suit } from "./gameTypes";
+import type { Card, GameStateWS, Suit, Rank } from "./gameTypes";
 
 type View = "lobby" | "game";
 
@@ -35,8 +35,9 @@ type GameStateMessage = {
 type TablePosition = "bottom" | "top" | "left" | "right";
 const TABLE_POSITIONS: TablePosition[] = ["bottom", "left", "top", "right"];
 
-// message pour choose_trump
 type SuitSymbol = Suit;
+
+// message pour choose_trump
 type ChooseTrumpPayloadWS =
   | { action: "take"; suit?: SuitSymbol }
   | { action: "pass" };
@@ -45,6 +46,47 @@ type ChooseTrumpMessageWS = {
   type: "choose_trump";
   payload: ChooseTrumpPayloadWS;
 };
+
+function sortHandBySuitColor(
+  hand: Card[],
+  trumpSuit: SuitSymbol | null
+): Card[] {
+    const isBlack = (s: SuitSymbol) => s === "♣" || s === "♠";
+    const allSuits: SuitSymbol[] = ["♣", "♦", "♠", "♥"];
+
+    const nonTrumpSuits = trumpSuit
+      ? allSuits.filter((s) => s !== trumpSuit)
+      : allSuits;
+
+    const blackNonTrumps = nonTrumpSuits.filter(isBlack);
+    const redNonTrumps = nonTrumpSuits.filter((s) => !isBlack(s));
+
+    const suitOrder: SuitSymbol[] = [];
+    let bi = 0;
+    let ri = 0;
+    while (bi < blackNonTrumps.length || ri < redNonTrumps.length) {
+      if (bi < blackNonTrumps.length){
+        suitOrder.push(blackNonTrumps[bi++]);
+      }
+      if (ri < redNonTrumps.length){
+        suitOrder.push(redNonTrumps[ri++])
+      }
+    }
+
+    if (trumpSuit) {
+      suitOrder.push(trumpSuit);
+    }
+
+    const rankOrder: Rank[] = ["7", "8", "9", "J", "Q", "K", "10", "A"];
+    const rankValue = (rank: Rank) => rankOrder.indexOf(rank);
+
+    return [...hand].sort((a, b) => {
+      const sa = suitOrder.indexOf(a.suit as SuitSymbol);
+      const sb = suitOrder.indexOf(b.suit as SuitSymbol);
+      if (sa !== sb) return sa - sb;
+      return rankValue(a.rank) - rankValue(b.rank);
+    });
+}
 
 // Styles globaux pour les animations
 const GLOBAL_STYLES = `
@@ -208,6 +250,13 @@ function App() {
   const mySeat =
     roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
 
+  const fullHand: Card[] = 
+    gameState && mySeat !== null
+      ? gameState.hands[String(mySeat)] || []
+      : [];
+
+  const showSortButton = fullHand.length === 8;
+
   const isMyTurn =
     gameState &&
     mySeat !== null &&
@@ -215,11 +264,11 @@ function App() {
     gameState.phase === "PlayingTricks";
 
   const canAnnounceBelote =
-    !!gameState &&
+    gameState &&
     mySeat !== null &&
     gameState.phase == "PlayingTricks" &&
-    !!gameState.trumpSuit &&
-    !!gameState.belote.announced;
+    gameState.trumpSuit &&
+    gameState.belote.announced;
 
   const handleAnnounceBelote = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -229,6 +278,14 @@ function App() {
       JSON.stringify({
         type: "announce_belote",
       })
+    );
+  };
+
+  const handleSortHand = () => {
+    if (!gameState) return;
+
+    setDisplayHand((current) =>
+      sortHandBySuitColor(current, gameState.trumpSuit ?? null)
     );
   };
 
@@ -1001,13 +1058,16 @@ function App() {
               )}
             </p>
 
-            {gameState && canAnnounceBelote && (
-              <div
-                style={{
-                  margin: "0 0 0.35rem 0.4rem",
-                  fontSize: "0.8rem",
-                }}
-              >
+            <div
+              style={{
+                display: "flex",
+                gap: "0.4rem",
+                margin: "0 0 0.35rem 0.4rem",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              {gameState && canAnnounceBelote && (
                 <button
                   type="button"
                   onClick={handleAnnounceBelote}
@@ -1024,8 +1084,26 @@ function App() {
                 >
                   🎺 Belote !
                 </button>
-              </div>
-            )}
+              )}
+
+              {gameState && showSortButton && (
+                <button
+                  type="button"
+                  onClick={handleSortHand}
+                  style={{
+                    padding: "0.3rem 0.8rem",
+                    borderRadius: "9999px",
+                    border: "1px solid rgba(148,163,184,0.8)",
+                    background: "rgba(15,23,42,0.95)",
+                    color: "#e5e7eb",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  🪄 Trier la main
+                </button>
+              )}
+            </div>
 
             <div
               style={{
