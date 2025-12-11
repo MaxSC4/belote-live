@@ -56,6 +56,12 @@ const config: Config = {
           "80%": { transform: "translateY(2px)" },
           "100%": { transform: "translateY(0)" },
         },
+        "trick-spotlight": {
+          "0%": { transform: "scale(0.9)", opacity: "0" },
+          "15%": { transform: "scale(1.05)", opacity: "1" },
+          "80%": { transform: "scale(1)", opacity: "1" },
+          "100%": { transform: "scale(0.97)", opacity: "0" },
+        },
       },
       animation: {
         "trick-from-top": "trick-from-top 0.22s ease-out",
@@ -66,6 +72,7 @@ const config: Config = {
         "final-score-pop": "final-score-pop 0.3s ease-out",
         "backdrop-fade": "backdrop-fade 0.25s ease-out",
         "hand-shuffle": "hand-shuffle 0.35s ease-out",
+        "trick-spotlight": "trick-spotlight 2s ease-out",
       },
     },
   },

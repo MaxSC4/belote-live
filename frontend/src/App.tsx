@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { config } from "./config";
 import type { Card, GameStateWS, Suit } from "./gameTypes";
 
@@ -298,13 +298,20 @@ function App() {
   const team0Progress = getProgress(matchTeam0);
   const team1Progress = getProgress(matchTeam1);
   const trickWinner = gameState?.trick?.winner;
+  const trickWinnerName =
+    trickWinner !== undefined && trickWinner !== null
+      ? playerNameForSeat(trickWinner)
+      : null;
 
-  function seatToTablePosition(seat: number | null): TablePosition | null {
-    if (seat === null) return null;
-    if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
-    const relativeIndex = (seat - mySeat + 4) % 4;
-    return TABLE_POSITIONS[relativeIndex] ?? null;
-  }
+  const seatToTablePosition = useCallback(
+    (seat: number | null): TablePosition | null => {
+      if (seat === null) return null;
+      if (mySeat === null) return TABLE_POSITIONS[seat] ?? null;
+      const relativeIndex = (seat - mySeat + 4) % 4;
+      return TABLE_POSITIONS[relativeIndex] ?? null;
+    },
+    [mySeat]
+  );
 
   const playersByPosition: Partial<Record<TablePosition, RoomPlayer>> = {};
   roomPlayers.forEach((player) => {
@@ -326,15 +333,20 @@ function App() {
 
   const trumpChooserSeat = gameState?.trumpChooser ?? null;
 
-  function cardPositionForPlayerSeat(seat: number): TablePosition {
-    return seatToTablePosition(seat) ?? "top";
-  }
-
   const remainingCardsForSeat = (seat: number | null): number => {
     if (seat === null || !gameState) return 0;
     if (seat === mySeat) return displayHand.length;
     return gameState.hands[String(seat)]?.length ?? 0;
   };
+
+  const trickCardPlacements = useMemo(() => {
+    if (!gameState?.trick) return [];
+    return gameState.trick.cards.map((tc, order) => ({
+      ...tc,
+      position: seatToTablePosition(tc.player) ?? "top",
+      order,
+    }));
+  }, [gameState?.trick, seatToTablePosition]);
 
   // ---- Animations : gagnant de pli & fin de donne ----
 
@@ -624,17 +636,9 @@ function App() {
             </div>
           )}
           {/* Bannière gagnant du pli */}
-          {showTrickWinnerBanner &&
-            gameState &&
-            gameState.trick &&
-            gameState.trick.winner !== undefined && (
-              <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-400/80 bg-gradient-to-r from-emerald-600/90 to-emerald-500/80 px-4 py-1 text-xs font-medium text-emerald-50 shadow-[0_18px_35px_-24px_rgba(0,0,0,1)] animate-trick-winner-banner">
-                💥 Pli pour
-                <strong className="text-white">
-                  {playerNameForSeat(gameState.trick.winner)}
-                </strong>
-              </div>
-            )}
+          {showTrickWinnerBanner && trickWinnerName && (
+            <TrickWinnerSpotlight winnerName={trickWinnerName} />
+          )}
 
           {/* JOUEURS + PLI AU CENTRE */}
           <div className="grid flex-1 grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
@@ -692,19 +696,14 @@ function App() {
 
             {/* PLI */}
             <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
-              {gameState &&
-                gameState.trick &&
-                gameState.trick.cards.map((tc, idx) => {
-                  const pos = cardPositionForPlayerSeat(tc.player);
-                  return (
-                    <TrickCardView
-                      key={`${tc.player}-${idx}`}
-                      position={pos}
-                      card={tc.card}
-                      playerLabel={shortSeatLabel(tc.player)}
-                    />
-                  );
-                })}
+              {trickCardPlacements.map((tc) => (
+                <TrickCardView
+                  key={`${tc.player}-${tc.order}`}
+                  position={tc.position}
+                  card={tc.card}
+                  playerLabel={shortSeatLabel(tc.player)}
+                />
+              ))}
             </div>
 
             <SeatBanner
@@ -1164,21 +1163,19 @@ function TrickCardView(props: {
       ? "animate-trick-from-left"
       : "animate-trick-from-right";
 
-  const basePositionClass: Record<TablePosition, string> = {
-    top: "left-1/2 top-4 -translate-x-1/2",
-    bottom: "left-1/2 bottom-4 -translate-x-1/2",
-    left: "left-4 top-1/2 -translate-y-1/2",
-    right: "right-4 top-1/2 -translate-y-1/2",
+  const positionClass: Record<TablePosition, string> = {
+    top: "-translate-x-1/2 -translate-y-[125%]",
+    bottom: "-translate-x-1/2 translate-y-[35%]",
+    left: "-translate-x-[165%] -translate-y-1/2",
+    right: "translate-x-[65%] -translate-y-1/2",
   };
 
-  const directionClass =
-    position === "top"
-      ? "flex-col"
-      : position === "bottom"
-      ? "flex-col-reverse"
-      : position === "left"
-      ? "flex-row"
-      : "flex-row-reverse";
+  const directionClass: Record<TablePosition, string> = {
+    top: "flex-col",
+    bottom: "flex-col-reverse",
+    left: "flex-row",
+    right: "flex-row-reverse",
+  };
 
   const alignmentClass =
     position === "left"
@@ -1187,22 +1184,52 @@ function TrickCardView(props: {
       ? "items-center text-right"
       : "items-center text-center";
 
+  const zIndex =
+    position === "bottom" ? 40 : position === "top" ? 35 : position === "left" ? 38 : 38;
+
   return (
     <div
-      className={cx(
-        "absolute flex gap-2 text-xs text-slate-100 drop-shadow-[0_15px_25px_rgba(0,0,0,0.65)]",
-        basePositionClass[position],
-        directionClass,
-        alignmentClass,
-        animationClass
-      )}
+      className={cx("absolute left-1/2 top-1/2", positionClass[position])}
+      style={{ zIndex }}
     >
-      <div className="rounded-full border border-emerald-300/40 bg-slate-900/70 px-3 py-0.5 text-[0.6rem] uppercase tracking-[0.4em] text-emerald-200 shadow-inner shadow-black/40">
-        {playerLabel}
+      <div
+        className={cx(
+          "flex gap-2 text-xs text-slate-100 drop-shadow-[0_20px_28px_rgba(0,0,0,0.55)]",
+          directionClass[position],
+          alignmentClass,
+          animationClass
+        )}
+      >
+        <div className="rounded-full border border-emerald-300/50 bg-slate-900/80 px-3 py-1 text-[0.58rem] uppercase tracking-[0.45em] text-emerald-100 shadow-inner shadow-black/50">
+          {playerLabel}
+        </div>
+        <div className="relative">
+          <CardSvg card={card} variant="trick" />
+          <div className="pointer-events-none absolute inset-1 rounded-xl border border-white/10 shadow-inner shadow-emerald-200/10" />
+        </div>
       </div>
-      <div className="relative">
-        <CardSvg card={card} variant="trick" />
-        <div className="pointer-events-none absolute inset-1 rounded-lg border border-white/10" />
+    </div>
+  );
+}
+
+function TrickWinnerSpotlight(props: { winnerName: string }) {
+  const { winnerName } = props;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center">
+      <div className="relative flex flex-col items-center gap-4 rounded-[2.5rem] border border-emerald-300/70 bg-gradient-to-b from-emerald-900/95 via-slate-950/95 to-slate-950/95 px-10 py-8 text-center text-white shadow-[0_45px_95px_-40px_rgba(0,0,0,0.95)] animate-trick-spotlight">
+        <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.9rem] bg-emerald-400/15 blur-3xl" />
+        <div className="flex items-center gap-3 text-4xl leading-none text-emerald-200">
+          <span>🏆</span>
+          <span className="text-3xl font-black tracking-[0.2em] text-emerald-100">
+            PLI GAGNÉ
+          </span>
+        </div>
+        <p className="text-xs uppercase tracking-[0.65em] text-emerald-200">
+          Bravo à
+        </p>
+        <p className="text-3xl font-black tracking-wide text-white drop-shadow">
+          {winnerName}
+        </p>
       </div>
     </div>
   );
