@@ -8,20 +8,20 @@ export default function CardBackFan(props: CardBackFanProps) {
   const { count } = props;
   const cardsToShow = Math.min(7, count);
   const cardsArray = Array.from({ length: cardsToShow });
-  const angleSpread = 12;
+  const angleSpread = 18;
   const startAngle = -((cardsToShow - 1) / 2) * angleSpread;
 
   return (
-    <div className="relative mt-1 flex flex-col items-center gap-1">
-      <div className="relative h-16 w-24">
+    <div className="relative flex w-full flex-col items-center gap-2">
+      <div className="relative h-16 w-full max-w-[7rem]">
         {cardsArray.map((_, idx) => {
           const angle = startAngle + idx * angleSpread;
           return (
             <div
               key={idx}
-              className="absolute left-1/2 top-1/2"
+              className="absolute left-1/2 top-[60%]"
               style={{
-                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-6px)`,
+                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-8px)`,
                 zIndex: idx,
               }}
             >
@@ -30,7 +30,7 @@ export default function CardBackFan(props: CardBackFanProps) {
           );
         })}
       </div>
-      <span className="text-[0.65rem] uppercase tracking-[0.4em] text-slate-200">
+      <span className="z-10 mt-1 inline-flex h-6 w-12 items-center justify-center rounded-full border border-slate-500/70 bg-slate-950/90 px-2 text-[0.65rem] font-semibold text-slate-100">
         {count}
       </span>
     </div>
