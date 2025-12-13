@@ -677,15 +677,17 @@ function App() {
 
   useEffect(() => {
     if (!playerHandRef.current) return;
-    const cards = playerHandRef.current.querySelectorAll(".player-hand-card");
-    if (!cards.length) return;
+    const shells =
+      playerHandRef.current.querySelectorAll<HTMLElement>(".player-hand-card-inner");
+    if (!shells.length) return;
     if (!isSorting && incomingCardsRef.current > 0) {
-      const newestCard = cards[cards.length - 1];
+      const newestCard = shells[shells.length - 1];
       if (newestCard) {
         anime.remove(newestCard);
         anime({
           targets: newestCard,
           translateY: [-18, 0],
+          opacity: [0, 1],
           easing: "easeOutQuad",
           duration: 360,
         });
@@ -1917,7 +1919,9 @@ function App() {
                       transition: "transform 0.15s ease-out, filter 0.15s ease-out",
                     }}
                   >
-                    <CardSvg card={card} />
+                    <div className="player-hand-card-inner">
+                      <CardSvg card={card} />
+                    </div>
                   </button>
                 );
               })}
