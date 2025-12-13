@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import anime from "animejs/lib/anime.es.js";
+import anime from "animejs";
 import type { Card } from "../../gameTypes";
 import type { TablePosition } from "../../types/table";
 import { cx } from "../../utils/cx";

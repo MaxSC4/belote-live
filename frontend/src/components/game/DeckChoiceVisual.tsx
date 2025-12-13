@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import anime from "animejs/lib/anime.es.js";
+import anime from "animejs";
 import type { Card } from "../../gameTypes";
 import CardBackSvg from "./cards/CardBackSvg";
 import CardSvg from "./cards/CardSvg";
@@ -20,8 +20,8 @@ export default function DeckChoiceVisual(props: DeckChoiceVisualProps) {
       anime.remove(cards);
       anime({
         targets: cards,
-        rotate: (el, i) => [-2 + i * 1.2, -1 + i * 1.5],
-        translateY: (el, i) => [-i * 2, -i * 2],
+        rotate: (_: unknown, i: number) => [-2 + i * 1.2, -1 + i * 1.5],
+        translateY: (_: unknown, i: number) => [-i * 2, -i * 2],
         duration: 1600,
         direction: "alternate",
         easing: "easeInOutSine",
