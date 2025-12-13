@@ -24,6 +24,11 @@ export interface TrickWS {
     winner?: number;
 }
 
+export interface PlayerReactionWS {
+    emoji: string;
+    expiresAt: number;
+}
+
 export interface GameStateWS {
     phase: GamePhaseWS;
     dealer: number;
@@ -56,6 +61,8 @@ export interface GameStateWS {
         points: number;
         team: "team0" | "team1" | null;
     };
+
+    playerReactions?: Record<string, PlayerReactionWS>;
 }
 
 // Pour l'endpoint /debug/deal

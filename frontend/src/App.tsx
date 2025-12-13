@@ -44,6 +44,8 @@ const PHASE_LABELS: Record<string, string> = {
   Finished: "Donne terminée",
 };
 
+const REACTION_EMOJIS = ["😄", "😡", "😢", "😎", "🤔", "🎉"] as const;
+
 // message pour choose_trump
 type ChooseTrumpPayloadWS =
   | { action: "take"; suit?: SuitSymbol }
@@ -129,6 +131,7 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [isLandscape, setIsLandscape] = useState(true);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
 
   // ---- LOBBY ----
 
@@ -158,6 +161,8 @@ function App() {
       setHoveredIndex(null);
       setDisplayHand([]);
       prevHandRef.current = [];
+      setShowReactionPicker(false);
+      setShowMobilePanel(false);
       return;
     }
 
@@ -259,6 +264,18 @@ function App() {
     );
   };
 
+  const handleSendReaction = (emoji: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!gameState) return;
+    wsRef.current.send(
+      JSON.stringify({
+        type: "player_reaction",
+        payload: { emoji },
+      })
+    );
+    setShowReactionPicker(false);
+  };
+
   const handleSortHand = () => {
     if (!gameState || mySeat === null) return;
 
@@ -316,12 +333,38 @@ function App() {
     [mySeat]
   );
 
+  const activeReactionsBySeat = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (!gameState?.playerReactions) return map;
+    Object.entries(gameState.playerReactions).forEach(([seatKey, reaction]) => {
+      const seatNumber = Number(seatKey);
+      if (Number.isNaN(seatNumber)) return;
+      map[seatNumber] = reaction.emoji;
+    });
+    return map;
+  }, [gameState?.playerReactions]);
+
+  const reactionForSeat = (seat: number | null | undefined) => {
+    if (seat === null || seat === undefined) return undefined;
+    const emoji = activeReactionsBySeat[seat];
+    return emoji ? { emoji } : undefined;
+  };
+
   const playersByPosition: Partial<Record<TablePosition, RoomPlayer>> = {};
   roomPlayers.forEach((player) => {
     if (player.seat === null) return;
     const pos = seatToTablePosition(player.seat);
     if (!pos) return;
     playersByPosition[pos] = player;
+  });
+
+  const reactionsByPosition: Partial<Record<TablePosition, string>> = {};
+  TABLE_POSITIONS.forEach((position) => {
+    const seat = playersByPosition[position]?.seat ?? null;
+    const reaction = reactionForSeat(seat);
+    if (reaction) {
+      reactionsByPosition[position] = reaction.emoji;
+    }
   });
 
   function playerNameForSeat(seat: number): string {
@@ -366,6 +409,7 @@ function App() {
             player.seat !== null &&
             player.seat === gameState.currentPlayer;
           const isYou = player.nickname === nickname;
+          const reaction = reactionForSeat(player.seat);
 
           return (
             <li
@@ -378,11 +422,18 @@ function App() {
               )}
             >
               <div>
-                <span className="text-slate-100">
-                  {player.nickname}
-                  {isYou && <span className="text-indigo-200"> (vous)</span>}
-                  {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
-                </span>
+                <div className="flex flex-wrap items-center gap-2 text-slate-100">
+                  <span>
+                    {player.nickname}
+                    {isYou && <span className="text-indigo-200"> (vous)</span>}
+                    {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
+                  </span>
+                  {reaction && (
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/10 text-base leading-none text-emerald-100">
+                      {reaction.emoji}
+                    </span>
+                  )}
+                </div>
                 {isCurrent && (
                   <span className="ml-2 text-xs text-emerald-300">
                     tour de jeu
@@ -821,89 +872,104 @@ function App() {
           )}
 
           {/* JOUEURS + PLI AU CENTRE */}
-          <div className="grid flex-1 grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
-            <SeatBanner
-              position="top"
-              player={playersByPosition.top}
-              isCurrent={
-                !!(
-                  gameState &&
-                  playersByPosition.top?.seat === gameState.currentPlayer
-                )
-              }
-              isTrumpChooser={
-                playersByPosition.top?.seat !== null &&
-                playersByPosition.top?.seat === trumpChooserSeat
-              }
-              cardsCount={remainingCardsForSeat(
-                playersByPosition.top?.seat ?? null
-              )}
-            />
-            <SeatBanner
-              position="left"
-              player={playersByPosition.left}
-              isCurrent={
-                !!(
-                  gameState &&
-                  playersByPosition.left?.seat === gameState.currentPlayer
-                )
-              }
-              isTrumpChooser={
-                playersByPosition.left?.seat !== null &&
-                playersByPosition.left?.seat === trumpChooserSeat
-              }
-              cardsCount={remainingCardsForSeat(
-                playersByPosition.left?.seat ?? null
-              )}
-            />
-            <SeatBanner
-              position="right"
-              player={playersByPosition.right}
-              isCurrent={
-                !!(
-                  gameState &&
-                  playersByPosition.right?.seat === gameState.currentPlayer
-                )
-              }
-              isTrumpChooser={
-                playersByPosition.right?.seat !== null &&
-                playersByPosition.right?.seat === trumpChooserSeat
-              }
-              cardsCount={remainingCardsForSeat(
-                playersByPosition.right?.seat ?? null
-              )}
-            />
+          <div className="relative flex-1">
+            <div className="grid h-full grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
+              <SeatBanner
+                position="top"
+                player={playersByPosition.top}
+                isCurrent={
+                  !!(
+                    gameState &&
+                    playersByPosition.top?.seat === gameState.currentPlayer
+                  )
+                }
+                isTrumpChooser={
+                  playersByPosition.top?.seat !== null &&
+                  playersByPosition.top?.seat === trumpChooserSeat
+                }
+                cardsCount={remainingCardsForSeat(
+                  playersByPosition.top?.seat ?? null
+                )}
+              />
+              <SeatBanner
+                position="left"
+                player={playersByPosition.left}
+                isCurrent={
+                  !!(
+                    gameState &&
+                    playersByPosition.left?.seat === gameState.currentPlayer
+                  )
+                }
+                isTrumpChooser={
+                  playersByPosition.left?.seat !== null &&
+                  playersByPosition.left?.seat === trumpChooserSeat
+                }
+                cardsCount={remainingCardsForSeat(
+                  playersByPosition.left?.seat ?? null
+                )}
+              />
+              <SeatBanner
+                position="right"
+                player={playersByPosition.right}
+                isCurrent={
+                  !!(
+                    gameState &&
+                    playersByPosition.right?.seat === gameState.currentPlayer
+                  )
+                }
+                isTrumpChooser={
+                  playersByPosition.right?.seat !== null &&
+                  playersByPosition.right?.seat === trumpChooserSeat
+                }
+                cardsCount={remainingCardsForSeat(
+                  playersByPosition.right?.seat ?? null
+                )}
+              />
 
-            {/* PLI */}
-            <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
-              {trickCardPlacements.map((tc) => (
-                <TrickCardView
-                  key={`${tc.player}-${tc.order}`}
-                  position={tc.position}
-                  card={tc.card}
-                  playerLabel={shortSeatLabel(tc.player)}
-                />
-              ))}
+              {/* PLI */}
+              <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
+                {trickCardPlacements.map((tc) => (
+                  <TrickCardView
+                    key={`${tc.player}-${tc.order}`}
+                    position={tc.position}
+                    card={tc.card}
+                    playerLabel={shortSeatLabel(tc.player)}
+                  />
+                ))}
+              </div>
+
+              <SeatBanner
+                position="bottom"
+                player={playersByPosition.bottom}
+                isCurrent={
+                  !!(
+                    gameState &&
+                    playersByPosition.bottom?.seat === gameState.currentPlayer
+                  )
+                }
+                isSelf={true}
+                isTrumpChooser={
+                  playersByPosition.bottom?.seat !== null &&
+                  playersByPosition.bottom?.seat === trumpChooserSeat
+                }
+                cardsCount={remainingCardsForSeat(
+                  playersByPosition.bottom?.seat ?? null
+                )}
+              />
             </div>
-
-            <SeatBanner
-              position="bottom"
-              player={playersByPosition.bottom}
-              isCurrent={
-                !!(
-                  gameState &&
-                  playersByPosition.bottom?.seat === gameState.currentPlayer
-                )
-              }
-              isSelf={true}
-              isTrumpChooser={
-                playersByPosition.bottom?.seat !== null &&
-                playersByPosition.bottom?.seat === trumpChooserSeat
-              }
-              cardsCount={remainingCardsForSeat(
-                playersByPosition.bottom?.seat ?? null
-              )}
-            />
+            <div className="pointer-events-none absolute inset-0 z-20">
+              {TABLE_POSITIONS.map((position) => {
+                const emoji = reactionsByPosition[position];
+                if (!emoji) return null;
+                return (
+                  <ReactionBubble
+                    key={`reaction-${position}`}
+                    position={position}
+                    emoji={emoji}
+                  />
+                );
+              })}
+            </div>
           </div>
 
           {/* OVERLAY DE PRISE / ENCHÈRES */}
@@ -996,32 +1062,68 @@ function App() {
           {/* MAIN EN ÉVENTAIL */}
           <div className="mt-6 flex flex-col px-2 text-slate-100">
             <div className="mx-auto mb-3 flex w-full max-w-lg flex-wrap items-center justify-center gap-2 text-sm">
-              {gameState && canAnnounceBelote && (
-                <button
-                  type="button"
-                  onClick={handleAnnounceBelote}
-                  className="group flex items-center gap-2 rounded-full border border-amber-300/70 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-300 px-4 py-1.5 font-semibold text-slate-900 shadow-[0_14px_30px_-18px_rgba(251,191,36,0.9)] transition hover:scale-105"
-                >
-                  <span className="text-base">🎺</span>
-                  <span className="text-xs font-bold uppercase tracking-[0.25em]">
-                    {beloteButtonLabel}
-                  </span>
-                </button>
-              )}
+          {gameState && canAnnounceBelote && (
+            <button
+              type="button"
+              onClick={handleAnnounceBelote}
+              className="group flex items-center gap-2 rounded-full border border-amber-300/70 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-300 px-4 py-1.5 font-semibold text-slate-900 shadow-[0_14px_30px_-18px_rgba(251,191,36,0.9)] transition hover:scale-105"
+            >
+              <span className="text-base">🎺</span>
+              <span className="text-xs font-bold uppercase tracking-[0.25em]">
+                {beloteButtonLabel}
+              </span>
+            </button>
+          )}
 
-              {gameState && showSortButton && (
-                <button
-                  type="button"
-                  onClick={handleSortHand}
-                  className="group flex items-center gap-2 rounded-full border border-cyan-300/60 bg-slate-950/80 px-4 py-1.5 font-semibold text-cyan-100 shadow-[0_12px_25px_-16px_rgba(16,185,129,0.9)] transition hover:border-cyan-200"
-                >
-                  <span className="text-base">🪄</span>
-                  <span className="text-xs font-bold uppercase tracking-[0.25em]">
-                    Trier la main
-                  </span>
-                </button>
+          {gameState && showSortButton && (
+            <button
+              type="button"
+              onClick={handleSortHand}
+              className="group flex items-center gap-2 rounded-full border border-cyan-300/60 bg-slate-950/80 px-4 py-1.5 font-semibold text-cyan-100 shadow-[0_12px_25px_-16px_rgba(16,185,129,0.9)] transition hover:border-cyan-200"
+            >
+              <span className="text-base">🪄</span>
+              <span className="text-xs font-bold uppercase tracking-[0.25em]">
+                Trier la main
+              </span>
+            </button>
+          )}
+
+          {gameState && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowReactionPicker((prev) => !prev)}
+                className={cx(
+                  "flex h-11 w-11 items-center justify-center rounded-full border text-2xl transition shadow-[0_12px_25px_-16px_rgba(168,85,247,0.9)]",
+                  showReactionPicker
+                    ? "border-violet-300 bg-violet-500/30 text-violet-50"
+                    : "border-violet-300/60 bg-slate-950/80 text-violet-100 hover:border-violet-200"
+                )}
+                aria-label="Réactions"
+              >
+                😊
+              </button>
+
+              {showReactionPicker && (
+                <div className="absolute left-1/2 top-full z-20 mt-3 w-[220px] -translate-x-1/2 rounded-3xl border border-violet-300/50 bg-slate-950/95 p-4 text-left shadow-[0_25px_60px_-30px_rgba(139,92,246,0.7)]">
+                  <div className="grid grid-cols-3 gap-3">
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => handleSendReaction(emoji)}
+                        className="flex aspect-square items-center justify-center rounded-2xl border border-slate-600/60 bg-slate-900/70 text-2xl transition hover:border-violet-300"
+                        aria-label={`Emoji ${emoji}`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
+          )}
+        </div>
 
             <div className="mb-2 flex flex-wrap items-center justify-center gap-3 text-center text-sm font-semibold uppercase tracking-wide text-slate-200">
               <span className="text-base tracking-[0.35em]">Votre main</span>
@@ -1314,6 +1416,29 @@ function TrickWinnerSpotlight(props: { winnerName: string }) {
           {winnerName}
         </p>
       </div>
+    </div>
+  );
+}
+
+function ReactionBubble(props: { position: TablePosition; emoji: string }) {
+  const { position, emoji } = props;
+  const positionClass: Record<TablePosition, string> = {
+    top: "left-1/2 top-2 -translate-x-1/2 -translate-y-full",
+    bottom: "left-1/2 bottom-2 -translate-x-1/2 translate-y-full",
+    left: "left-[6%] top-1/2 -translate-x-full -translate-y-1/2",
+    right: "right-[6%] top-1/2 translate-x-full -translate-y-1/2",
+  };
+
+  return (
+    <div
+      className={cx(
+        "pointer-events-none absolute z-30 flex items-center justify-center text-3xl text-white drop-shadow-[0_10px_35px_rgba(0,0,0,0.45)]",
+        positionClass[position]
+      )}
+    >
+      <span className="rounded-full border border-emerald-300/70 bg-slate-950/85 px-4 py-2 shadow-[0_18px_35px_-20px_rgba(16,185,129,0.8)] animate-reaction-pop">
+        {emoji}
+      </span>
     </div>
   );
 }

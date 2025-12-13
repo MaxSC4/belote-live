@@ -62,6 +62,13 @@ const config: Config = {
           "80%": { transform: "scale(1)", opacity: "1" },
           "100%": { transform: "scale(0.97)", opacity: "0" },
         },
+        "reaction-pop": {
+          "0%": { transform: "translateY(6px) scale(0.9) rotate(-2deg)", opacity: "0" },
+          "25%": { transform: "translateY(0) scale(1) rotate(0deg)", opacity: "1" },
+          "50%": { transform: "translateY(-4px) scale(1.05) rotate(2deg)", opacity: "1" },
+          "75%": { transform: "translateY(0) scale(0.98) rotate(0deg)", opacity: "0.95" },
+          "100%": { transform: "translateY(4px) scale(1) rotate(-2deg)", opacity: "0.9" },
+        },
       },
       animation: {
         "trick-from-top": "trick-from-top 0.22s ease-out",
@@ -73,6 +80,7 @@ const config: Config = {
         "backdrop-fade": "backdrop-fade 0.25s ease-out",
         "hand-shuffle": "hand-shuffle 0.35s ease-out",
         "trick-spotlight": "trick-spotlight 2s ease-out",
+        "reaction-pop": "reaction-pop 1.2s ease-in-out infinite alternate",
       },
     },
   },

@@ -37,10 +37,20 @@ interface Room {
     };
 
     dealNumber: number;
+    reactions: (PlayerReactionState | null)[];
+    reactionTimeouts: (NodeJS.Timeout | null)[];
 }
+
+interface PlayerReactionState {
+    emoji: string;
+    expiresAt: number;
+}
+
+const REACTION_DURATION_MS = 5000;
 
 const clients = new Map<ClientId, ClientInfo>();
 const rooms = new Map<string, Room>();
+const ALLOWED_REACTION_EMOJIS = new Set(["😡", "😄", "😢", "🤔", "😎", "🎉"]);
 
 function generateClientId(): ClientId {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -89,6 +99,7 @@ interface GameStateMessage extends BaseMessage {
             };
 
             dealNumber: number;
+            playerReactions: Record<string, PlayerReactionState>;
         };
     };
 }
@@ -110,12 +121,20 @@ interface AnnounceBeloteMessage extends BaseMessage {
     type: "announce_belote";
 }
 
+interface PlayerReactionMessage extends BaseMessage {
+    type: "player_reaction";
+    payload: {
+        emoji: string;
+    };
+}
+
 type IncomingMessage =
     | JoinRoomMessage
     | StartGameMessage
     | PlayCardMessage
     | ChooseTrumpMessage
-    | AnnounceBeloteMessage;
+    | AnnounceBeloteMessage
+    | PlayerReactionMessage;
 
 // --------- Utils envoi ---------
 
@@ -163,6 +182,7 @@ function broadcastGameState(room: Room) {
                 ...room.gameState,
                 matchScores: room.matchScores,
                 dealNumber: room.dealNumber,
+                playerReactions: serializeReactions(room),
             },
         },
     };
@@ -172,6 +192,43 @@ function broadcastGameState(room: Room) {
         if (!client) continue;
         if (client.ws.readyState === WebSocket.OPEN) {
             send(client.ws, message);
+        }
+    }
+}
+
+function serializeReactions(room: Room) {
+    const payload: Record<string, PlayerReactionState> = {};
+    room.reactions.forEach((reaction, seatIndex) => {
+        if (!reaction) return;
+        payload[String(seatIndex)] = reaction;
+    });
+    return payload;
+}
+
+function scheduleReactionTimeout(room: Room, seat: PlayerId) {
+    const existing = room.reactionTimeouts[seat];
+    if (existing) {
+        clearTimeout(existing);
+    }
+    room.reactionTimeouts[seat] = setTimeout(() => {
+        room.reactionTimeouts[seat] = null;
+        if (room.reactions[seat]) {
+            room.reactions[seat] = null;
+            broadcastGameState(room);
+        }
+    }, REACTION_DURATION_MS);
+}
+
+function clearReactionForSeat(room: Room, seat: PlayerId, shouldBroadcast = true) {
+    const existing = room.reactionTimeouts[seat];
+    if (existing) {
+        clearTimeout(existing);
+        room.reactionTimeouts[seat] = null;
+    }
+    if (room.reactions[seat]) {
+        room.reactions[seat] = null;
+        if (shouldBroadcast) {
+            broadcastGameState(room);
         }
     }
 }
@@ -201,6 +258,8 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
             seats: [null, null, null, null],
             matchScores: { team0: 0, team1: 0 },
             dealNumber: 0,
+            reactions: [null, null, null, null],
+            reactionTimeouts: [null, null, null, null],
         };
         rooms.set(roomCode, room);
     }
@@ -222,8 +281,9 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
         if (client.seat !== undefined) {
             const seatIndex = client.seat;
             if (oldRoom.seats[seatIndex] === client.id) {
-            oldRoom.seats[seatIndex] = null;
+                oldRoom.seats[seatIndex] = null;
             }
+            clearReactionForSeat(oldRoom, seatIndex);
         }
 
         if (oldRoom.clients.size === 0) {
@@ -472,6 +532,53 @@ function handleAnnounceBeloteMessage(client: ClientInfo){
     broadcastGameState(room);
 }
 
+function handlePlayerReactionMessage(client: ClientInfo, message: PlayerReactionMessage) {
+    if (!client.roomCode) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const room = rooms.get(client.roomCode);
+    if (!room || !room.gameState) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Aucune partie en cours dans cette room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (client.seat === undefined) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'avez pas de siège assigné." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const emoji = message.payload?.emoji;
+    if (typeof emoji !== "string" || !ALLOWED_REACTION_EMOJIS.has(emoji)) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Emoji non autorisé." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    room.reactions[client.seat] = {
+        emoji,
+        expiresAt: Date.now() + REACTION_DURATION_MS,
+    };
+    scheduleReactionTimeout(room, client.seat);
+    broadcastGameState(room);
+}
+
 
 function handleClientDisconnect(clientId: ClientId) {
     const client = clients.get(clientId);
@@ -485,8 +592,9 @@ function handleClientDisconnect(clientId: ClientId) {
         if (client.seat !== undefined) {
             const seatIndex = client.seat;
             if (room.seats[seatIndex] === clientId) {
-            room.seats[seatIndex] = null;
+                room.seats[seatIndex] = null;
             }
+            clearReactionForSeat(room, seatIndex);
         }
 
         if (room.clients.size === 0) {
@@ -546,6 +654,9 @@ export function setupWebSocketServer(httpServer: Server) {
                 break;
             case "announce_belote":
                 handleAnnounceBeloteMessage(client);
+                break;
+            case "player_reaction":
+                handlePlayerReactionMessage(client, parsed);
                 break;
             default: {
                 const msg: ErrorMessage = {
