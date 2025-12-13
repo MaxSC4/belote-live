@@ -259,7 +259,7 @@ export default function AuthScreen(props: AuthScreenProps) {
                   Le tapis digital des clubs de belote
                 </h2>
                 <p className="mt-3 text-sm text-emerald-50/80 leading-relaxed">
-                  Interface stylée, avatars personnalisés, annonces animées et classements persistants : tout ce qu’il faut pour donner à vos soirées belote un vrai caractère e-sport.
+                  Interface stylée, avatars personnalisés, annonces animées et classements persistants : tout ce qu’il faut pour vos soirées belote.
                 </p>
               </header>
               <div className="grid gap-5 sm:grid-cols-2">

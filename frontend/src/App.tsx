@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import anime from "animejs/lib/anime.es.js";
 import type { Session } from "@supabase/supabase-js";
 import { config } from "./config";
 import type { Card, GameStateWS, Suit } from "./gameTypes";
@@ -127,6 +128,24 @@ function App() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [displayHand, setDisplayHand] = useState<Card[]>([]);
   const prevHandRef = useRef<Card[]>([]);
+  const dealTimeoutsRef = useRef<number[]>([]);
+  const incomingCardsRef = useRef(0);
+  const team0BarRef = useRef<HTMLDivElement>(null);
+  const team1BarRef = useRef<HTMLDivElement>(null);
+  const team0ScoreRef = useRef<HTMLSpanElement>(null);
+  const team1ScoreRef = useRef<HTMLSpanElement>(null);
+  const dealScore0Ref = useRef<HTMLParagraphElement>(null);
+  const dealScore1Ref = useRef<HTMLParagraphElement>(null);
+  const playerHandRef = useRef<HTMLDivElement>(null);
+  const turnBadgeRef = useRef<HTMLSpanElement>(null);
+
+  const cancelDealAnimation = useCallback(() => {
+    dealTimeoutsRef.current.forEach((timeoutId) => {
+      clearTimeout(timeoutId);
+    });
+    dealTimeoutsRef.current = [];
+    incomingCardsRef.current = 0;
+  }, []);
 
   // Tri
   const [isSorting, setIsSorting] = useState(false);
@@ -532,13 +551,13 @@ function App() {
   };
 
   const handleSortHand = () => {
-    if (!gameState || mySeat === null) return;
+    if (!gameState || mySeat === null || isSorting) return;
 
     setIsSorting(true);
     setDisplayHand((current) =>
       sortHandBySuitColor(current, gameState.trumpSuit ?? null)
     );
-    setTimeout(() => setIsSorting(false), 350);
+    setTimeout(() => setIsSorting(false), 450);
   };
 
   const handlePlayCard = (card: Card) => {
@@ -563,6 +582,12 @@ function App() {
 
   const matchTeam0 = gameState?.matchScores?.team0 ?? 0;
   const matchTeam1 = gameState?.matchScores?.team1 ?? 0;
+  const currentDealScore0 = gameState?.scores.team0 ?? 0;
+  const currentDealScore1 = gameState?.scores.team1 ?? 0;
+  const previousMatchTeam0 = useRef(matchTeam0);
+  const previousMatchTeam1 = useRef(matchTeam1);
+  const previousDealScore0 = useRef(currentDealScore0);
+  const previousDealScore1 = useRef(currentDealScore1);
   const MAX_MATCH_POINTS = 1001;
   const MIN_BAR_PERCENT = 3;
   const getProgress = (score: number) => {
@@ -649,6 +674,145 @@ function App() {
     }));
   }, [gameState?.trick, seatToTablePosition]);
 
+  useEffect(() => {
+    if (!playerHandRef.current) return;
+    const cards = playerHandRef.current.querySelectorAll(".player-hand-card");
+    if (!cards.length) return;
+    anime.remove(cards);
+    if (isSorting) {
+      anime.remove(cards);
+      anime({
+        targets: cards,
+        delay: anime.stagger(30),
+        duration: 360,
+        easing: "easeOutCubic",
+        translateY: [
+          { value: -8 },
+          { value: 0 },
+        ],
+        scale: [
+          { value: 1.03 },
+          { value: 1 },
+        ],
+      });
+      return;
+    }
+
+    if (incomingCardsRef.current > 0) {
+      const newestCard = cards[cards.length - 1];
+      if (newestCard) {
+        anime.remove(newestCard);
+        anime({
+          targets: newestCard,
+          translateY: [-18, 0],
+          easing: "easeOutQuad",
+          duration: 360,
+        });
+      }
+      incomingCardsRef.current = Math.max(0, incomingCardsRef.current - 1);
+    }
+  }, [displayHand, isSorting]);
+
+  useEffect(() => {
+    if (!turnBadgeRef.current) return;
+    const badge = turnBadgeRef.current;
+    anime.remove(badge);
+    if (!isMyTurn) return;
+    const animation = anime({
+      targets: badge,
+      scale: [0.99, 1.02],
+      boxShadow: [
+        "0px 0px 4px rgba(16,185,129,0.12)",
+        "0px 0px 10px rgba(16,185,129,0.22)",
+      ],
+      easing: "easeInOutSine",
+      duration: 1500,
+      direction: "alternate",
+      loop: true,
+    });
+    return () => {
+      animation.pause();
+    };
+  }, [isMyTurn]);
+
+  useEffect(() => {
+    if (!team0BarRef.current) return;
+    anime.remove(team0BarRef.current);
+    anime({
+      targets: team0BarRef.current,
+      width: `${team0Progress}%`,
+      duration: 700,
+      easing: "easeOutCubic",
+    });
+  }, [team0Progress]);
+
+  useEffect(() => {
+    if (!team1BarRef.current) return;
+    anime.remove(team1BarRef.current);
+    anime({
+      targets: team1BarRef.current,
+      width: `${team1Progress}%`,
+      duration: 700,
+      easing: "easeOutCubic",
+    });
+  }, [team1Progress]);
+
+  useEffect(() => {
+    if (!team0ScoreRef.current) return;
+    const start = previousMatchTeam0.current ?? 0;
+    previousMatchTeam0.current = matchTeam0;
+    anime.remove(team0ScoreRef.current);
+    anime({
+      targets: team0ScoreRef.current,
+      innerHTML: [start, matchTeam0],
+      round: 1,
+      duration: 520,
+      easing: "easeOutExpo",
+    });
+  }, [matchTeam0]);
+
+  useEffect(() => {
+    if (!team1ScoreRef.current) return;
+    const start = previousMatchTeam1.current ?? 0;
+    previousMatchTeam1.current = matchTeam1;
+    anime.remove(team1ScoreRef.current);
+    anime({
+      targets: team1ScoreRef.current,
+      innerHTML: [start, matchTeam1],
+      round: 1,
+      duration: 520,
+      easing: "easeOutExpo",
+    });
+  }, [matchTeam1]);
+
+  useEffect(() => {
+    if (!dealScore0Ref.current) return;
+    const start = previousDealScore0.current ?? 0;
+    previousDealScore0.current = currentDealScore0;
+    anime.remove(dealScore0Ref.current);
+    anime({
+      targets: dealScore0Ref.current,
+      innerHTML: [start, currentDealScore0],
+      round: 1,
+      duration: 420,
+      easing: "easeOutQuad",
+    });
+  }, [currentDealScore0]);
+
+  useEffect(() => {
+    if (!dealScore1Ref.current) return;
+    const start = previousDealScore1.current ?? 0;
+    previousDealScore1.current = currentDealScore1;
+    anime.remove(dealScore1Ref.current);
+    anime({
+      targets: dealScore1Ref.current,
+      innerHTML: [start, currentDealScore1],
+      round: 1,
+      duration: 420,
+      easing: "easeOutQuad",
+    });
+  }, [currentDealScore1]);
+
   const sidebarContent = (
     <div className="space-y-3">
       <h2 className="text-base font-medium text-white">Joueurs</h2>
@@ -721,14 +885,18 @@ function App() {
                 <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
                   {shortSeatLabel(0)}·{shortSeatLabel(2)}
                 </p>
-                <p className="text-2xl">{gameState.scores.team0}</p>
+                <p ref={dealScore0Ref} className="text-2xl">
+                  {currentDealScore0}
+                </p>
                 <p className="text-[0.6rem] text-emerald-100/70">pts</p>
               </div>
               <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
                 <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
                   {shortSeatLabel(1)}·{shortSeatLabel(3)}
                 </p>
-                <p className="text-2xl">{gameState.scores.team1}</p>
+                <p ref={dealScore1Ref} className="text-2xl">
+                  {currentDealScore1}
+                </p>
                 <p className="text-[0.6rem] text-emerald-100/70">pts</p>
               </div>
             </div>
@@ -746,13 +914,14 @@ function App() {
                     {shortSeatLabel(0)} &amp; {shortSeatLabel(2)}
                   </span>
                   <span className="text-base font-semibold text-white">
-                    {matchTeam0} pts
+                    <span ref={team0ScoreRef}>{matchTeam0}</span> pts
                   </span>
                 </div>
                 <div className="mt-1 h-2 rounded-full bg-slate-800/70">
                   <div
+                    ref={team0BarRef}
                     className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
-                    style={{ width: `${team0Progress}%` }}
+                    style={{ width: 0 }}
                   />
                 </div>
               </div>
@@ -762,13 +931,14 @@ function App() {
                     {shortSeatLabel(1)} &amp; {shortSeatLabel(3)}
                   </span>
                   <span className="text-base font-semibold text-white">
-                    {matchTeam1} pts
+                    <span ref={team1ScoreRef}>{matchTeam1}</span> pts
                   </span>
                 </div>
                 <div className="mt-1 h-2 rounded-full bg-slate-800/70">
                   <div
+                    ref={team1BarRef}
                     className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
-                    style={{ width: `${team1Progress}%` }}
+                    style={{ width: 0 }}
                   />
                 </div>
               </div>
@@ -850,6 +1020,8 @@ function App() {
   // ---- Animation de distribution de la main ----
 
   useEffect(() => {
+    cancelDealAnimation();
+
     if (!gameState || mySeat === null) {
       setDisplayHand([]);
       prevHandRef.current = [];
@@ -859,53 +1031,44 @@ function App() {
     const full = gameState.hands[String(mySeat)] || [];
     const prev = prevHandRef.current;
 
-    // Nouvelle donne : on reçoit 5 cartes en phase ChoosingTrumpFirstRound
     const isNewDeal =
       prev.length === 0 &&
       full.length === 5 &&
       gameState.phase === "ChoosingTrumpFirstRound";
 
-    if (isNewDeal) {
-      setDisplayHand([]);
-      let i = 0;
-      const interval = setInterval(() => {
-        i++;
-        setDisplayHand(full.slice(0, i));
-        if (i >= full.length) {
-          clearInterval(interval);
-        }
-      }, 120);
-      prevHandRef.current = full;
-      return () => clearInterval(interval);
-    }
-
-    // Complément à 8 cartes une fois l'atout choisi
     const isCompletingHand =
       prev.length === 5 &&
       full.length === 8 &&
       gameState.phase === "PlayingTricks";
 
-    if (isCompletingHand) {
-      setDisplayHand(prev);
-      const newCards = full.slice(5);
-      let i = 0;
-      const interval = setInterval(() => {
-        i++;
-        setDisplayHand((current) => [...current, newCards[i - 1]]);
-        if (i >= newCards.length) {
-          clearInterval(interval);
-        }
-      }, 140);
-      prevHandRef.current = full;
-      return () => clearInterval(interval);
-    }
+    const scheduleCards = (cards: Card[], reset = false) => {
+      if (!cards.length) return;
+      if (reset) {
+        setDisplayHand([]);
+      }
+      incomingCardsRef.current += cards.length;
+      cards.forEach((card, idx) => {
+        const timeoutId = window.setTimeout(() => {
+          setDisplayHand((current) => [...current, card]);
+        }, idx * 220);
+        dealTimeoutsRef.current.push(timeoutId);
+      });
+    };
 
-    // Fallback (connexion en cours de donne, reconnection, etc.)
-    if (full.length !== prev.length) {
+    if (isNewDeal) {
+      scheduleCards(full, true);
+    } else if (isCompletingHand) {
+      const newCards = full.slice(prev.length);
+      scheduleCards(newCards);
+    } else if (full.length !== prev.length) {
       setDisplayHand(full);
     }
+
     prevHandRef.current = full;
-  }, [gameState, mySeat]);
+    return () => {
+      cancelDealAnimation();
+    };
+  }, [gameState, mySeat, cancelDealAnimation]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -1500,6 +1663,7 @@ function App() {
                     position={tc.position}
                     card={tc.card}
                     playerLabel={shortSeatLabel(tc.player)}
+                    order={tc.order}
                   />
                 ))}
               </div>
@@ -1700,7 +1864,10 @@ function App() {
             <div className="mb-2 flex flex-wrap items-center justify-center gap-3 text-center text-sm font-semibold uppercase tracking-wide text-slate-200">
               <span className="text-base tracking-[0.35em]">Votre main</span>
               {isMyTurn && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-500/20 px-3 py-1 text-xs font-bold tracking-[0.25em] text-emerald-100 shadow-[0_10px_25px_-15px_rgba(16,185,129,1)] animate-pulse">
+                <span
+                  ref={turnBadgeRef}
+                  className="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-500/20 px-3 py-1 text-xs font-bold tracking-[0.25em] text-emerald-100 shadow-[0_10px_25px_-15px_rgba(16,185,129,1)]"
+                >
                   ▶ A VOUS DE JOUER
                 </span>
               )}
@@ -1709,7 +1876,7 @@ function App() {
               )}
             </div>
 
-            <div className="relative mx-auto h-[9.5rem] w-full max-w-4xl">
+            <div ref={playerHandRef} className="relative mx-auto h-[9.5rem] w-full max-w-4xl">
               {isSorting && (
                 <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-[0.4em] text-emerald-200">
@@ -1734,7 +1901,7 @@ function App() {
 
                 const isHovered = clickable && hoveredIndex === index;
                 const finalTransform = isHovered
-                  ? `${baseTransform} translateY(-10px) scale(1.08)`
+                  ? `${baseTransform} translateY(-8px)`
                   : baseTransform;
 
                 return (
@@ -1747,7 +1914,7 @@ function App() {
                     onMouseLeave={() =>
                       setHoveredIndex((prev) => (prev === index ? null : prev))
                     }
-                    className="absolute left-1/2 bottom-0 -translate-x-1/2 transform-gpu focus:outline-none"
+                    className="player-hand-card absolute left-1/2 bottom-0 transform-gpu focus:outline-none"
                     style={{
                       transform: finalTransform,
                       transformOrigin: "50% 100%",

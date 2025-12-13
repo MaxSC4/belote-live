@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import anime from "animejs/lib/anime.es.js";
 import type { Card } from "../../gameTypes";
 import type { TablePosition } from "../../types/table";
 import { cx } from "../../utils/cx";
@@ -7,10 +9,35 @@ interface TrickCardViewProps {
   position: TablePosition;
   card: Card;
   playerLabel: string;
+  order: number;
 }
 
 export default function TrickCardView(props: TrickCardViewProps) {
-  const { position, card, playerLabel } = props;
+  const { position, card, playerLabel, order } = props;
+  const motionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!motionRef.current) return;
+    const offsetMap: Record<TablePosition, { x: number; y: number; tilt: number }> = {
+      top: { x: 0, y: -90, tilt: -6 },
+      bottom: { x: 0, y: 90, tilt: 6 },
+      left: { x: -120, y: 0, tilt: -10 },
+      right: { x: 120, y: 0, tilt: 10 },
+    };
+    const { x, y, tilt } = offsetMap[position];
+    anime.remove(motionRef.current);
+    anime({
+      targets: motionRef.current,
+      opacity: [0, 1],
+      translateX: [x, 0],
+      translateY: [y, 0],
+      rotateZ: [tilt, 0],
+      scale: [0.85, 1],
+      easing: "easeOutExpo",
+      duration: 620,
+      delay: order * 110,
+    });
+  }, [card.rank, card.suit, playerLabel, position, order]);
 
   const animationClass =
     position === "top"
@@ -57,6 +84,7 @@ export default function TrickCardView(props: TrickCardViewProps) {
       style={{ zIndex }}
     >
       <div
+        ref={motionRef}
         className={cx(
           "flex gap-2 text-xs text-slate-100 drop-shadow-[0_20px_28px_rgba(0,0,0,0.55)]",
           directionClass[position],
