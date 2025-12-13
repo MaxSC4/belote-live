@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import anime from "animejs/lib/anime.es.js";
+import anime from "animejs";
 import type { Session } from "@supabase/supabase-js";
 import { config } from "./config";
 import type { Card, GameStateWS, Suit } from "./gameTypes";
