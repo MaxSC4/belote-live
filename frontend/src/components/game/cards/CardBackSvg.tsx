@@ -20,52 +20,59 @@ export default function CardBackSvg(props: CardBackSvgProps) {
     >
       <defs>
         <linearGradient id="card-back" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#1e293b" />
+          <stop offset="0%" stopColor="#111827" />
           <stop offset="100%" stopColor="#0f172a" />
         </linearGradient>
         <pattern
-          id="card-dots"
-          x="0"
-          y="0"
+          id="card-weave"
           width="6"
           height="6"
           patternUnits="userSpaceOnUse"
         >
-          <circle cx="1" cy="1" r="1" fill="#1f2937" />
+          <path d="M0 6 L6 0" stroke="#1f2937" strokeWidth="0.8" />
+          <path d="M-1 1 L1 -1" stroke="#111827" strokeWidth="0.7" />
         </pattern>
+        <linearGradient id="card-accent" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#34d399" />
+          <stop offset="100%" stopColor="#059669" />
+        </linearGradient>
       </defs>
       <rect
         x={1}
         y={1}
         width={50}
         height={70}
-        rx={6}
-        ry={6}
+        rx={7}
+        ry={7}
         fill="url(#card-back)"
         stroke="#10b981"
-        strokeWidth={0.7}
+        strokeWidth={0.8}
       />
       <rect
         x={4}
         y={4}
         width={44}
         height={64}
-        rx={4}
-        ry={4}
-        fill="url(#card-dots)"
-        stroke="#0f172a"
+        rx={5}
+        ry={5}
+        fill="url(#card-weave)"
+        stroke="#1f2937"
+        strokeWidth={0.4}
+      />
+      <path
+        d="M10 18 L42 18 L35 54 H17 Z"
+        fill="rgba(5,150,105,0.08)"
+        stroke="rgba(52,211,153,0.3)"
+        strokeWidth={0.6}
+      />
+      <circle cx={26} cy={36} r={13} fill="rgba(15,23,42,0.75)" stroke="rgba(16,185,129,0.4)" strokeWidth={0.6} />
+      <path
+        d="M26 28 L32 36 L26 44 L20 36 Z"
+        fill="url(#card-accent)"
+        stroke="#064e3b"
         strokeWidth={0.5}
       />
-      <rect
-        x={15}
-        y={20}
-        width={22}
-        height={32}
-        rx={6}
-        fill="rgba(16,185,129,0.25)"
-        stroke="rgba(16,185,129,0.6)"
-        strokeWidth={0.8}
-      />
+      <circle cx={26} cy={36} r={3} fill="#0f172a" stroke="#34d399" strokeWidth={0.5} />
     </svg>
   );
 }

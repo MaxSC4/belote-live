@@ -1654,7 +1654,7 @@ function App() {
 
           {/* JOUEURS + PLI AU CENTRE */}
           <div className="relative flex-1">
-            <div className="grid h-full grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
+            <div className="grid h-full grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-4">
             <SeatBanner
               position="top"
               player={playersByPosition.top}
