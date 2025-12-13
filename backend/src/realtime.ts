@@ -29,6 +29,7 @@ interface ClientInfo {
         wins: number;
         games: number;
     };
+    isGuest?: boolean;
 }
 
 interface Room {
@@ -82,7 +83,12 @@ interface JoinRoomMessage extends BaseMessage {
     payload: {
         roomCode: string;
         nickname?: string;
-        accessToken: string;
+        accessToken?: string;
+        guest?: {
+            id: string;
+            username: string;
+            avatarUrl?: string | null;
+        };
     };
 }
 
@@ -286,53 +292,74 @@ function clearReactionForSeat(room: Room, seat: PlayerId, shouldBroadcast = true
 async function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
     const roomCode = message.payload.roomCode.trim().toUpperCase();
     const accessToken = message.payload.accessToken?.trim();
+    const guestPayload = message.payload.guest;
 
-    if (!roomCode || !accessToken) {
+    if (!roomCode || (!accessToken && !guestPayload)) {
         const error: ErrorMessage = {
             type: "error",
-            payload: { message: "roomCode et accessToken sont obligatoires." },
+            payload: { message: "roomCode est obligatoire. Fournissez un token Supabase ou le mode invité." },
         };
         send(client.ws, error);
         return;
     }
 
-    if (!supabaseAdmin || !hasSupabaseConfig) {
-        const error: ErrorMessage = {
-            type: "error",
-            payload: { message: "Supabase n'est pas configuré côté serveur." },
-        };
-        send(client.ws, error);
-        return;
-    }
+    let resolvedNickname = message.payload.nickname?.trim();
+    let resolvedAvatar: string | null = null;
+    let resolvedStats: { wins: number; games: number } | undefined;
+    let resolvedUserId: string | undefined;
+    let isGuest = false;
 
-    let supabaseUser;
-    try {
-        supabaseUser = await requireSupabaseUser(accessToken);
-    } catch (err: any) {
-        const error: ErrorMessage = {
-            type: "error",
-            payload: { message: err?.message ?? "Token Supabase invalide." },
-        };
-        send(client.ws, error);
-        return;
-    }
+    if (accessToken) {
+        if (!supabaseAdmin || !hasSupabaseConfig) {
+            const error: ErrorMessage = {
+                type: "error",
+                payload: { message: "Supabase n'est pas configuré côté serveur." },
+            };
+            send(client.ws, error);
+            return;
+        }
 
-    const usernameFallback =
-        message.payload.nickname?.trim() ||
-        supabaseUser.user_metadata?.username ||
-        supabaseUser.email ||
-        `Joueur-${supabaseUser.id.slice(0, 4)}`;
+        let supabaseUser;
+        try {
+            supabaseUser = await requireSupabaseUser(accessToken);
+        } catch (err: any) {
+            const error: ErrorMessage = {
+                type: "error",
+                payload: { message: err?.message ?? "Token Supabase invalide." },
+            };
+            send(client.ws, error);
+            return;
+        }
 
-    let profile: ProfileRecord;
-    try {
-        profile = await fetchOrCreateProfile(supabaseUser.id, usernameFallback);
-    } catch (err: any) {
-        const error: ErrorMessage = {
-            type: "error",
-            payload: { message: err?.message ?? "Profil Supabase indisponible." },
+        const usernameFallback =
+            resolvedNickname ||
+            supabaseUser.user_metadata?.username ||
+            supabaseUser.email ||
+            `Joueur-${supabaseUser.id.slice(0, 4)}`;
+
+        let profile: ProfileRecord;
+        try {
+            profile = await fetchOrCreateProfile(supabaseUser.id, usernameFallback);
+        } catch (err: any) {
+            const error: ErrorMessage = {
+                type: "error",
+                payload: { message: err?.message ?? "Profil Supabase indisponible." },
+            };
+            send(client.ws, error);
+            return;
+        }
+
+        resolvedNickname = profile.username;
+        resolvedAvatar = profile.avatar_url ?? null;
+        resolvedStats = {
+            wins: profile.wins ?? 0,
+            games: profile.games ?? 0,
         };
-        send(client.ws, error);
-        return;
+        resolvedUserId = profile.id;
+    } else if (guestPayload) {
+        isGuest = true;
+        resolvedNickname = guestPayload.username?.trim() || `Invité-${client.id.slice(-4)}`;
+        resolvedAvatar = guestPayload.avatarUrl ?? null;
     }
 
     let room = rooms.get(roomCode);
@@ -380,13 +407,13 @@ async function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessag
         }
     }
 
-    client.nickname = profile.username;
-    client.avatarUrl = profile.avatar_url ?? null;
-    client.userId = profile.id;
-    client.profileStats = {
-        wins: profile.wins ?? 0,
-        games: profile.games ?? 0,
-    };
+    resolvedNickname = resolvedNickname || `Joueur-${client.id.slice(-4)}`;
+
+    client.nickname = resolvedNickname;
+    client.avatarUrl = resolvedAvatar ?? null;
+    client.userId = resolvedUserId;
+    client.profileStats = resolvedStats;
+    client.isGuest = isGuest;
     client.roomCode = roomCode;
 
     // Assigner un siège s'il n'en a pas déjà
@@ -635,10 +662,19 @@ function handleAnnounceBeloteMessage(client: ClientInfo){
 }
 
 async function handleSyncProfileMessage(client: ClientInfo, message: SyncProfileMessage) {
-    if (!client.roomCode || !client.userId) {
+    if (!client.roomCode) {
         const error: ErrorMessage = {
             type: "error",
             payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (!client.userId) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Fonction réservée aux comptes authentifiés." },
         };
         send(client.ws, error);
         return;

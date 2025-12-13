@@ -64,7 +64,7 @@ const server = http.createServer(async (req, res) => {
 
             const { data, error } = await supabaseAdmin.storage
                 .from(AVATAR_BUCKET)
-                .createSignedUploadUrl(path, 60);
+                .createSignedUploadUrl(path, { upsert: true });
 
             if (error || !data?.signedUrl) {
                 throw new Error(error?.message ?? "Impossible de générer l'URL d'upload.");

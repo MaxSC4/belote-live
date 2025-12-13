@@ -27,6 +27,7 @@ interface UserProfile {
   avatar_url: string | null;
   wins: number;
   games: number;
+  isGuest?: boolean;
 }
 
 type RoomUpdateMessage = {
@@ -64,6 +65,9 @@ const PHASE_LABELS: Record<string, string> = {
 };
 
 const REACTION_EMOJIS = ["😄", "😡", "😢", "😎", "🤔", "🎉"] as const;
+
+const DEFAULT_GUEST_AVATAR =
+  "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTI4IDEyOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjMzhiZGY4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTBiOTgxIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PGNpcmNsZSBjeD0iNjQiIGN5PSI2NCIgcj0iNjAiIGZpbGw9InVybCgjZykiLz48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9Ii44NSIgZD0iTTY0IDM0Yy0xMy4yIDAtMjQgMTAuOC0yNCAyNHMxMC44IDI0IDI0IDI0IDI0LTEwLjggMjQtMjQtMTAuOC0yNC0yNC0yNHptMCA1NmMtMTkgMC0zNS4zIDEwLjktNDMuOCAyNS43IDEyIDcuOCAyNy4zIDEyLjMgNDMuOCAxMi4zczMxLjgtNC41IDQzLjgtMTIuM0M5OS4zIDEwMC45IDgzIDkwIDY0IDkweiIvPjwvc3ZnPg==";
 
 // message pour choose_trump
 type ChooseTrumpPayloadWS =
@@ -194,8 +198,11 @@ function App() {
 
   const handleJoin = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!session?.access_token || !roomCode) return;
-    setNickname(profile?.username ?? nickname);
+    if (!profile || !roomCode) return;
+    const hasAccessToken = Boolean(session?.access_token);
+    const isGuestProfile = Boolean(profile.isGuest);
+    if (!hasAccessToken && !isGuestProfile) return;
+    setNickname(profile.username);
     setView("game");
   };
 
@@ -224,7 +231,15 @@ function App() {
       return;
     }
 
-    if (!session?.access_token) {
+    if (!profile) {
+      setWsError("Profil manquant.");
+      return;
+    }
+
+    const accessToken = session?.access_token ?? null;
+    const isGuestProfile = Boolean(profile.isGuest);
+
+    if (!accessToken && !isGuestProfile) {
       setWsError("Session Supabase manquante.");
       return;
     }
@@ -237,10 +252,29 @@ function App() {
 
     ws.onopen = () => {
       setWsStatus("connected");
+      const joinPayload: {
+        roomCode: string;
+        nickname: string;
+        accessToken?: string;
+        guest?: { id: string; username: string; avatarUrl?: string | null };
+      } = {
+        roomCode,
+        nickname,
+      };
+      if (accessToken) {
+        joinPayload.accessToken = accessToken;
+      }
+      if (isGuestProfile) {
+        joinPayload.guest = {
+          id: profile.id,
+          username: profile.username,
+          avatarUrl: profile.avatar_url ?? DEFAULT_GUEST_AVATAR,
+        };
+      }
       ws.send(
         JSON.stringify({
           type: "join_room",
-          payload: { roomCode, nickname, accessToken: session.access_token },
+          payload: joinPayload,
         })
       );
     };
@@ -278,7 +312,16 @@ function App() {
     return () => {
       ws.close();
     };
-  }, [view, roomCode, nickname, session?.access_token]);
+  }, [
+    view,
+    roomCode,
+    nickname,
+    session?.access_token,
+    profile?.id,
+    profile?.username,
+    profile?.avatar_url,
+    profile?.isGuest,
+  ]);
 
   const handleStartGame = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -286,6 +329,15 @@ function App() {
   };
 
   const handleSignOut = async () => {
+    if (profile?.isGuest) {
+      setProfile(null);
+      setProfileForm({ username: "", avatarUrl: "" });
+      setNickname("");
+      setRoomCode("");
+      setView("lobby");
+      setShowProfileModal(false);
+      return;
+    }
     if (!supabase) return;
     await supabase.auth.signOut();
     setRoomCode("");
@@ -296,11 +348,48 @@ function App() {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleContinueAsGuest = () => {
+    const guestId = `guest-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
+    const guestName = `Invité-${Math.floor(Math.random() * 9000 + 1000)}`;
+    const guestProfile: UserProfile = {
+      id: guestId,
+      username: guestName,
+      avatar_url: DEFAULT_GUEST_AVATAR,
+      wins: 0,
+      games: 0,
+      isGuest: true,
+    };
+    setProfile(guestProfile);
+    setProfileForm({
+      username: guestName,
+      avatarUrl: guestProfile.avatar_url ?? "",
+    });
+    setNickname(guestName);
+    setView("lobby");
+    setAuthError(null);
+  };
+
   const handleSaveProfile = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (!supabase || !session) return;
     const username = profileForm.username.trim();
     if (!username) return;
+    if (profile?.isGuest) {
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              username,
+            }
+          : prev
+      );
+      setNickname(username);
+      setShowProfileModal(false);
+      setAuthError(null);
+      return;
+    }
+    if (!supabase || !session) return;
     setProfileSaving(true);
     const { error } = await supabase
       .from("profiles")
@@ -320,6 +409,7 @@ function App() {
       avatar_url: profileForm.avatarUrl.trim() || null,
       wins: profile?.wins ?? 0,
       games: profile?.games ?? 0,
+      isGuest: false,
     };
     setProfile(updated);
     setNickname(updated.username);
@@ -336,6 +426,10 @@ function App() {
   };
 
   const handleAvatarUpload = async (file: File) => {
+    if (profile?.isGuest) {
+      setAuthError("Les invités ne peuvent pas changer d'avatar.");
+      return;
+    }
     if (!supabase || !session) return;
     setAvatarUploading(true);
     setAuthError(null);
@@ -830,12 +924,15 @@ function App() {
 
   useEffect(() => {
     const supabaseClient = supabase;
-    if (!supabaseClient || !session) {
-      setProfile(null);
-      setProfileForm({ username: "", avatarUrl: "" });
-      if (!session) {
+    if (!supabaseClient) return;
+
+    if (!session) {
+      if (!profile?.isGuest) {
+        setProfile(null);
+        setProfileForm({ username: "", avatarUrl: "" });
         setNickname("");
       }
+      setProfileLoading(false);
       return;
     }
 
@@ -865,6 +962,7 @@ function App() {
             avatar_url: data.avatar_url ?? null,
             wins: data.wins ?? 0,
             games: data.games ?? 0,
+            isGuest: false,
           };
           setProfile(normalized);
           setProfileForm({
@@ -886,10 +984,10 @@ function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [session, profile?.isGuest]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || profile.isGuest) return;
     const selfPlayer = roomPlayers.find(
       (player) => player.userId && player.userId === profile.id && player.stats
     );
@@ -901,7 +999,7 @@ function App() {
         );
       }
     }
-  }, [roomPlayers, profile]);
+  }, [roomPlayers, profile?.id, profile?.wins, profile?.games, profile?.isGuest]);
 
   // ---- Choix d'atout (prise / passe) ----
 
@@ -952,13 +1050,14 @@ function App() {
     return <FullScreenLoader message="Connexion en cours..." />;
   }
 
-  if (!session) {
+  if (!session && !profile?.isGuest) {
     return (
       <AuthScreen
         mode={authMode}
         onToggleMode={setAuthMode}
         error={authError}
         onError={setAuthError}
+        onContinueAsGuest={handleContinueAsGuest}
       />
     );
   }
@@ -980,21 +1079,24 @@ function App() {
   const profileWinrate =
     profile.games > 0 ? Math.round((profile.wins / profile.games) * 100) : 0;
 
+  const canEditProfile = Boolean(profile && !profile.isGuest);
+  const editableProfile = canEditProfile ? profile : null;
+
   const profileQuickAccess =
-    profile &&
+    editableProfile &&
     (
       <button
         type="button"
         onClick={() => setShowProfileModal(true)}
         className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-cyan-300/50 bg-slate-950/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-100 shadow-[0_25px_50px_-12px_rgba(15,23,42,0.9)] backdrop-blur-sm transition hover:border-cyan-200 hover:text-cyan-50"
       >
-        <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} size="sm" />
+        <AvatarCircle avatarUrl={editableProfile.avatar_url} fallback={editableProfile.username} size="sm" />
         Profil
       </button>
     );
 
   const profileModal =
-    profile &&
+    editableProfile &&
     showProfileModal && (
       <ProfileModal
         values={profileForm}
@@ -1134,13 +1236,19 @@ function App() {
                 {profileWinrate}% WR · {profile.wins} victoires
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowProfileModal(true)}
-              className="rounded-full border border-slate-600/60 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-300"
-            >
-              Profil
-            </button>
+            {canEditProfile ? (
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(true)}
+                className="rounded-full border border-slate-600/60 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-300"
+              >
+                Profil
+              </button>
+            ) : (
+              <span className="rounded-full border border-cyan-400/40 px-3 py-1 text-[0.6rem] uppercase tracking-[0.35em] text-cyan-200">
+                Invité
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button
@@ -2282,8 +2390,9 @@ function AuthScreen(props: {
   onToggleMode: (mode: "signin" | "signup") => void;
   error: string | null;
   onError: (value: string | null) => void;
+  onContinueAsGuest: () => void;
 }) {
-  const { mode, onToggleMode, error, onError } = props;
+  const { mode, onToggleMode, error, onError, onContinueAsGuest } = props;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
@@ -2414,6 +2523,18 @@ function AuthScreen(props: {
             {loading ? "Patientez..." : mode === "signin" ? "Se connecter" : "Créer un compte"}
           </button>
         </form>
+        <div className="mt-8 space-y-2">
+          <button
+            type="button"
+            onClick={onContinueAsGuest}
+            className="w-full rounded-2xl border border-cyan-400/50 bg-slate-950/60 px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-100 transition hover:border-cyan-200/70 hover:text-white"
+          >
+            Jouer en invité
+          </button>
+          <p className="text-center text-[0.6rem] uppercase tracking-[0.35em] text-slate-500">
+            Avatar stylisé attribué automatiquement
+          </p>
+        </div>
       </div>
     </div>
   );
