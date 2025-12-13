@@ -10,6 +10,9 @@ import {
     hasSupabaseConfig,
 } from "./supabase";
 
+const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(async (req, res) => {
@@ -27,6 +30,51 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", service: "belote-live-backend" }));
+        return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/auth/check-email")) {
+        if (!hasSupabaseConfig || !supabaseAdmin || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Supabase n'est pas configuré côté serveur." }));
+            return;
+        }
+        try {
+            const requestUrl = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+            const email = requestUrl.searchParams.get("email");
+            if (!email) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Paramètre email manquant." }));
+                return;
+            }
+            const endpoint = `${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`;
+            const checkResponse = await fetch(endpoint, {
+                headers: {
+                    apikey: SUPABASE_SERVICE_KEY,
+                    Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+                    "Content-Type": "application/json",
+                },
+            });
+            if (!checkResponse.ok) {
+                throw new Error("Impossible de vérifier l'email auprès de Supabase.");
+            }
+            const payload = await checkResponse.json();
+            let exists = false;
+            if (Array.isArray(payload)) {
+                exists = payload.length > 0;
+            } else if (Array.isArray(payload?.users)) {
+                exists = payload.users.length > 0;
+            } else if (payload?.user) {
+                exists = true;
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ exists }));
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Impossible de vérifier l'email.";
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: message }));
+        }
         return;
     }
 

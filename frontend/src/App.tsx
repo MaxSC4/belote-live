@@ -66,6 +66,40 @@ const PHASE_LABELS: Record<string, string> = {
 
 const REACTION_EMOJIS = ["😄", "😡", "😢", "😎", "🤔", "🎉"] as const;
 
+interface HallOfFameEntry {
+  name: string;
+  winrate: number;
+  games: number;
+  avatarUrl: string | null;
+}
+
+const PLACEHOLDER_HALL_OF_FAME: HallOfFameEntry[] = [
+  {
+    name: "Lucie “Belotista”",
+    winrate: 82,
+    games: 310,
+    avatarUrl: null,
+  },
+  {
+    name: "Jules “Atout Roi”",
+    winrate: 78,
+    games: 420,
+    avatarUrl: null,
+  },
+  {
+    name: "Maya “Cut Master”",
+    winrate: 75,
+    games: 365,
+    avatarUrl: null,
+  },
+  {
+    name: "Noé “Capot”",
+    winrate: 71,
+    games: 290,
+    avatarUrl: null,
+  },
+];
+
 const DEFAULT_GUEST_AVATAR =
   "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTI4IDEyOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjMzhiZGY4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTBiOTgxIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PGNpcmNsZSBjeD0iNjQiIGN5PSI2NCIgcj0iNjAiIGZpbGw9InVybCgjZykiLz48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9Ii44NSIgZD0iTTY0IDM0Yy0xMy4yIDAtMjQgMTAuOC0yNCAyNHMxMC44IDI0IDI0IDI0IDI0LTEwLjggMjQtMjQtMTAuOC0yNC0yNC0yNHptMCA1NmMtMTkgMC0zNS4zIDEwLjktNDMuOCAyNS43IDEyIDcuOCAyNy4zIDEyLjMgNDMuOCAxMi4zczMxLjgtNC41IDQzLjgtMTIuM0M5OS4zIDEwMC45IDgzIDkwIDY0IDkweiIvPjwvc3ZnPg==";
 
@@ -161,10 +195,11 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileForm, setProfileForm] = useState({ username: "", avatarUrl: "" });
+  const [profileForm, setProfileForm] = useState({ username: "" });
   const [profileSaving, setProfileSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(PLACEHOLDER_HALL_OF_FAME);
 
   const supabaseReady = Boolean(supabase);
 
@@ -331,7 +366,7 @@ function App() {
   const handleSignOut = async () => {
     if (profile?.isGuest) {
       setProfile(null);
-      setProfileForm({ username: "", avatarUrl: "" });
+      setProfileForm({ username: "" });
       setNickname("");
       setRoomCode("");
       setView("lobby");
@@ -344,7 +379,7 @@ function App() {
     setView("lobby");
   };
 
-  const handleProfileFieldChange = (field: "username" | "avatarUrl", value: string) => {
+  const handleProfileFieldChange = (field: "username", value: string) => {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -364,7 +399,6 @@ function App() {
     setProfile(guestProfile);
     setProfileForm({
       username: guestName,
-      avatarUrl: guestProfile.avatar_url ?? "",
     });
     setNickname(guestName);
     setView("lobby");
@@ -396,7 +430,7 @@ function App() {
       .upsert({
         id: session.user.id,
         username,
-        avatar_url: profileForm.avatarUrl.trim() || null,
+        avatar_url: profile?.avatar_url ?? null,
       });
     setProfileSaving(false);
     if (error) {
@@ -406,7 +440,7 @@ function App() {
     const updated: UserProfile = {
       id: session.user.id,
       username,
-      avatar_url: profileForm.avatarUrl.trim() || null,
+      avatar_url: profile?.avatar_url ?? null,
       wins: profile?.wins ?? 0,
       games: profile?.games ?? 0,
       isGuest: false,
@@ -466,7 +500,6 @@ function App() {
       }
 
       const publicUrl: string = payload.publicUrl;
-      setProfileForm((prev) => ({ ...prev, avatarUrl: publicUrl }));
       const { error: updateError } = await supabase
         .from("profiles")
         .update({ avatar_url: publicUrl })
@@ -929,7 +962,7 @@ function App() {
     if (!session) {
       if (!profile?.isGuest) {
         setProfile(null);
-        setProfileForm({ username: "", avatarUrl: "" });
+        setProfileForm({ username: "" });
         setNickname("");
       }
       setProfileLoading(false);
@@ -967,7 +1000,6 @@ function App() {
           setProfile(normalized);
           setProfileForm({
             username: normalized.username,
-            avatarUrl: normalized.avatar_url ?? "",
           });
           setNickname(normalized.username);
           setAuthError(null);
@@ -1000,6 +1032,43 @@ function App() {
       }
     }
   }, [roomPlayers, profile?.id, profile?.wins, profile?.games, profile?.isGuest]);
+
+  useEffect(() => {
+    const supabaseClient = supabase;
+    if (!supabaseClient || view !== "lobby") return;
+    let active = true;
+    const fetchHallOfFame = async () => {
+      const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("id, username, wins, games, avatar_url")
+        .order("wins", { ascending: false })
+        .limit(4);
+      if (!active) return;
+      if (error || !data) {
+        return;
+      }
+      const mapped = data
+        .map((player) => {
+          const wins = player.wins ?? 0;
+          const games = player.games ?? 0;
+          const winrate = games > 0 ? Math.round((wins / games) * 100) : 0;
+          return {
+            name: player.username ?? `Joueur-${player.id.slice(0, 4)}`,
+            winrate,
+            games,
+            avatarUrl: player.avatar_url ?? null,
+          };
+        })
+        .filter((entry) => entry.games > 0 || entry.winrate > 0);
+      if (mapped.length > 0) {
+        setHallOfFame(mapped);
+      }
+    };
+    fetchHallOfFame();
+    return () => {
+      active = false;
+    };
+  }, [view, supabase]);
 
   // ---- Choix d'atout (prise / passe) ----
 
@@ -1106,72 +1175,133 @@ function App() {
         saving={profileSaving}
         onUploadAvatar={handleAvatarUpload}
         uploadingAvatar={avatarUploading}
+        avatarUrl={editableProfile.avatar_url}
       />
     );
 
   if (view === "lobby") {
     return (
       <>
-        <div className="min-h-screen bg-lobby px-6 py-10 font-sans text-slate-100">
-          <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-4xl flex-col justify-center">
-            <div className="rounded-[2.5rem] border border-slate-400/30 bg-slate-950/95 p-12 shadow-[0_35px_70px_-30px_rgba(0,0,0,0.85)]">
-              <div className="flex items-center justify-between gap-6">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-                    Lobby
-                  </p>
-                  <h2 className="mt-2 text-3xl font-semibold text-white">
-                    Créez ou rejoignez une table
-                  </h2>
-                  <p className="text-sm text-slate-400">
-                    Code personnalisé ? Partagez-le aux collègues et lancez la donne.
-                  </p>
-                </div>
-                <span className="hidden rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200 lg:block">
-                  4 joueurs
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCreateRoom}
-                className="mt-6 w-full rounded-2xl border border-cyan-300/40 bg-gradient-to-r from-cyan-400/20 via-emerald-300/10 to-sky-400/30 px-5 py-3 text-base font-semibold text-cyan-100 transition hover:border-cyan-200/70 hover:text-cyan-50"
-              >
-                Générer un code de table aléatoire
-              </button>
-
-              <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
-                <div className="flex items-center gap-4 rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4">
-                  <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
-                  <div className="flex-1">
-                    <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-                      Connecté en tant que
-                    </p>
-                    <p className="text-lg font-semibold text-white">{profile.username}</p>
-                    <p className="text-xs text-slate-400">
-                      {profileWinrate}% WR · {profile.wins} victoires
+        <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-[#021324] to-slate-950 px-6 py-12 font-sans text-slate-100">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-[radial-gradient(circle_at_top,_rgba(94,234,212,0.25),_transparent_60%)]" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-[radial-gradient(circle_at_bottom,_rgba(14,165,233,0.2),_transparent_60%)]" />
+          <div
+            className="pointer-events-none absolute left-10 top-20 hidden rotate-[-15deg] opacity-50 lg:block"
+            style={{ filter: "drop-shadow(0 25px 40px rgba(14,165,233,0.25))" }}
+          >
+            <img src={CARD_OVERLAY_SVG} alt="" className="h-36 w-auto" />
+          </div>
+          <div
+            className="pointer-events-none absolute bottom-14 right-12 hidden rotate-[10deg] opacity-60 lg:block"
+            style={{ filter: "drop-shadow(0 35px 45px rgba(16,185,129,0.3))" }}
+          >
+            <img src={CARD_OVERLAY_SVG} alt="" className="h-32 w-auto" />
+          </div>
+          <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col justify-center">
+            <div className="mb-8 text-center">
+              <p className="text-xs uppercase tracking-[0.6em] text-emerald-200/70">Belote Live</p>
+              <h2 className="mt-2 text-4xl font-semibold text-white">Choisissez votre table ou brillez au Hall of Fame</h2>
+              <p className="mt-3 text-sm text-slate-300">
+                Créez une salle privée, entrez un code partagé ou admirez les légendes de Belote Live.
+              </p>
+            </div>
+            <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-[2.5rem] border border-slate-800/70 bg-slate-950/85 p-10 shadow-[0_35px_80px_-45px_rgba(0,0,0,1)] backdrop-blur">
+                <div className="flex flex-wrap items-center justify-between gap-6">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.5em] text-cyan-200/70">Table privée</p>
+                    <h3 className="mt-2 text-3xl font-semibold text-white">Créez ou rejoignez une partie</h3>
+                    <p className="text-sm text-slate-400">
+                      Choisissez un code unique, partagez-le et lancez la donne avec votre crew.
                     </p>
                   </div>
+                  <span className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-xs font-medium uppercase tracking-[0.5em] text-emerald-200">
+                    4 joueurs
+                  </span>
                 </div>
 
-                <label className="flex flex-col gap-2 text-sm">
-                  <span className="text-slate-300">Code de table</span>
-                  <input
-                    id="roomCode"
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                    placeholder="Ex : TABLE42"
-                    className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-300"
-                  />
-                </label>
-
                 <button
-                  type="submit"
-                  className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-5 py-4 text-base font-semibold text-white transition hover:from-emerald-400 hover:via-green-500 hover:to-emerald-300"
+                  type="button"
+                  onClick={handleCreateRoom}
+                  className="mt-8 flex w-full items-center justify-between rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-500/25 via-emerald-400/20 to-sky-500/30 px-5 py-4 text-base font-semibold text-cyan-100 transition hover:border-cyan-200 hover:shadow-[0_25px_45px_-25px_rgba(6,182,212,0.8)]"
                 >
-                  Rejoindre la table
+                  <span>Générer un code aléatoire</span>
+                  <span className="text-lg">🔁</span>
                 </button>
-              </form>
+
+                <form onSubmit={handleJoin} className="mt-10 flex flex-col gap-6">
+                  <div className="flex items-center gap-4 rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-4 shadow-inner shadow-black/20">
+                    <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
+                    <div className="flex-1">
+                      <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+                        Connecté en tant que
+                      </p>
+                      <p className="text-lg font-semibold text-white">{profile.username}</p>
+                      <p className="text-xs text-slate-400">
+                        {profileWinrate}% WR · {profile.wins} victoires
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="flex flex-col gap-2 text-sm text-slate-200">
+                    Code de table
+                    <input
+                      id="roomCode"
+                      value={roomCode}
+                      onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                      placeholder="Ex : TABLE42"
+                      className="w-full rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-4 text-base tracking-[0.25em] text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300/40"
+                    />
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="mt-2 rounded-2xl bg-gradient-to-r from-emerald-400 via-green-400 to-emerald-300 px-5 py-4 text-base font-semibold uppercase tracking-[0.35em] text-slate-900 transition hover:brightness-110"
+                  >
+                    Rejoindre la table
+                  </button>
+                </form>
+              </div>
+
+              <div className="rounded-[2.5rem] border border-emerald-400/20 bg-gradient-to-br from-emerald-400/10 via-transparent to-cyan-400/5 p-8 shadow-[0_35px_70px_-45px_rgba(16,185,129,0.6)] backdrop-blur">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.6em] text-emerald-200/70">Hall of Fame</p>
+                    <h3 className="mt-2 text-2xl font-semibold text-white">Les légendes du moment</h3>
+                    <p className="text-sm text-emerald-50/80">
+                      Winrate et parties gagnées.
+                    </p>
+                  </div>
+                  <span className="text-3xl">🏆</span>
+                </div>
+                <div className="mt-6 space-y-4">
+                  {hallOfFame.map((player, index) => (
+                    <div
+                      key={`${player.name}-${index}`}
+                      className="group flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white shadow-[0_20px_45px_-35px_rgba(8,145,178,1)] transition hover:border-white/30"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/20 text-lg font-semibold text-emerald-200">
+                          #{index + 1}
+                        </div>
+                        <AvatarCircle avatarUrl={player.avatarUrl} fallback={player.name} size="sm" />
+                        <div>
+                          <p className="text-base font-semibold">{player.name}</p>
+                          <p className="text-xs text-emerald-100/80">
+                            {player.winrate}% WR · {player.games} parties
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs uppercase tracking-[0.45em] text-emerald-200">
+                        Star
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-6 text-center text-xs uppercase tracking-[0.4em] text-emerald-50/70">
+                  Pas mal, non ?
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1190,7 +1320,19 @@ function App() {
 
   return (
     <>
-    <div className="flex min-h-screen flex-col overflow-hidden bg-game px-3 pb-3 pt-4 font-sans text-slate-100 lg:h-screen">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-game px-3 pb-3 pt-4 font-sans text-slate-100 lg:h-screen">
+      <div
+        className="pointer-events-none absolute left-6 top-6 hidden rotate-[-10deg] opacity-60 xl:block"
+        style={{ filter: "drop-shadow(0 30px 50px rgba(6,182,212,0.3))" }}
+      >
+        <img src={CARD_OVERLAY_SVG} alt="" className="h-32 w-auto" />
+      </div>
+      <div
+        className="pointer-events-none absolute bottom-4 right-10 hidden rotate-[8deg] opacity-60 xl:block"
+        style={{ filter: "drop-shadow(0 35px 55px rgba(16,185,129,0.35))" }}
+      >
+        <img src={CARD_OVERLAY_SVG} alt="" className="h-30 w-auto" />
+      </div>
       {/* HEADER */}
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-900 pb-3">
         <div className="space-y-1">
@@ -2229,15 +2371,16 @@ function CardBackSvg(props: { variant?: "mini" | "stack" | "fan" }) {
 }
 
 function ProfileModal(props: {
-  values: { username: string; avatarUrl: string };
-  onChange: (field: "username" | "avatarUrl", value: string) => void;
+  values: { username: string };
+  onChange: (field: "username", value: string) => void;
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
   saving: boolean;
   onUploadAvatar: (file: File) => void;
   uploadingAvatar: boolean;
+  avatarUrl?: string | null;
 }) {
-  const { values, onChange, onClose, onSubmit, saving, onUploadAvatar, uploadingAvatar } = props;
+  const { values, onChange, onClose, onSubmit, saving, onUploadAvatar, uploadingAvatar, avatarUrl } = props;
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -2252,11 +2395,11 @@ function ProfileModal(props: {
       <div className="relative z-10 w-full max-w-md rounded-3xl border border-slate-600/60 bg-slate-950/95 p-6 text-sm shadow-[0_25px_60px_-30px_rgba(0,0,0,1)]">
         <h2 className="text-lg font-semibold text-white">Votre profil</h2>
         <p className="text-xs text-slate-400">
-          Mettez à jour votre pseudo et l&apos;URL de votre avatar.
+          Mettez à jour votre pseudo et votre avatar.
         </p>
         <form onSubmit={onSubmit} className="mt-4 space-y-4">
           <div className="flex items-center gap-4 rounded-2xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
-            <AvatarCircle avatarUrl={values.avatarUrl} fallback={values.username} />
+            <AvatarCircle avatarUrl={avatarUrl ?? null} fallback={values.username} />
             <div className="flex-1 text-xs text-slate-300">
               <p className="uppercase tracking-[0.35em]">Avatar</p>
               <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-600/70 px-3 py-1 text-[0.6rem] uppercase tracking-[0.35em] text-slate-200 transition hover:border-slate-400">
@@ -2278,15 +2421,6 @@ function ProfileModal(props: {
               onChange={(e) => onChange("username", e.target.value)}
               className="mt-1 rounded-2xl border border-slate-600/60 bg-slate-900/80 px-4 py-2 text-base text-white outline-none transition focus:border-emerald-400"
               required
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.35em] text-slate-400">
-            Avatar (URL)
-            <input
-              value={values.avatarUrl}
-              onChange={(e) => onChange("avatarUrl", e.target.value)}
-              className="mt-1 rounded-2xl border border-slate-600/60 bg-slate-900/80 px-4 py-2 text-base text-white outline-none transition focus:border-cyan-400"
-              placeholder="https://..."
             />
           </label>
           <div className="flex justify-end gap-2 pt-2">
@@ -2312,8 +2446,8 @@ function ProfileModal(props: {
 }
 
 function ProfileSetupScreen(props: {
-  values: { username: string; avatarUrl: string };
-  onChange: (field: "username" | "avatarUrl", value: string) => void;
+  values: { username: string };
+  onChange: (field: "username", value: string) => void;
   onSubmit: (event: React.FormEvent) => void;
   saving: boolean;
   error: string | null;
@@ -2334,7 +2468,7 @@ function ProfileSetupScreen(props: {
       <div className="w-full max-w-md rounded-[2rem] border border-slate-700 bg-slate-900/80 p-8 shadow-[0_30px_60px_-35px_rgba(0,0,0,1)]">
         <h1 className="text-2xl font-semibold text-white">Complétez votre profil</h1>
         <p className="mt-2 text-sm text-slate-400">
-          Choisissez un pseudo public et un avatar (URL).
+          Choisissez un pseudo public et un avatar.
         </p>
         {error && (
           <p className="mt-4 rounded-xl border border-rose-400/60 bg-rose-500/10 px-4 py-2 text-xs text-rose-100">
@@ -2343,7 +2477,7 @@ function ProfileSetupScreen(props: {
         )}
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div className="flex items-center gap-4 rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3">
-            <AvatarCircle avatarUrl={values.avatarUrl} fallback={values.username} />
+                <AvatarCircle avatarUrl={null} fallback={values.username} />
             <label className="flex-1 text-xs uppercase tracking-[0.35em] text-slate-400">
               Avatar
               <input
@@ -2364,14 +2498,6 @@ function ProfileSetupScreen(props: {
               required
             />
           </label>
-          <label className="flex flex-col gap-2 text-sm text-slate-200">
-            Avatar (URL)
-            <input
-              value={values.avatarUrl}
-              onChange={(e) => onChange("avatarUrl", e.target.value)}
-              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
-            />
-          </label>
           <button
             type="submit"
             disabled={saving}
@@ -2385,6 +2511,9 @@ function ProfileSetupScreen(props: {
   );
 }
 
+const CARD_OVERLAY_SVG =
+  "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTIwIDE2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGRlZnM+CiAgPGxpbmVhckdyYWRpZW50IGlkPSJjYXJkR3JhZGllbnQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM0ZGUxZmYiIHN0b3Atb3BhY2l0eT0iMC4zIiAvPgogICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMzRkMzk5IiBzdG9wLW9wYWNpdHk9IjAuMjUiIC8+CiAgPC9saW5lYXJHcmFkaWVudD4KICA8Y2xpcFBhdGggaWQ9ImNhcmRDbGlwIj4KICAgIDxyZWN0IHg9IjEwIiB5PSIxMCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxNDAiIHJ4PSIxNiIgcnk9IjE2IiAvPgogIDwvY2xpcFBhdGg+CjwvZGVmcz4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NhcmRDbGlwKSI+CiAgPHJlY3QgeD0iMTAiIHk9IjEwIiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjE0MCIgcng9IjE2IiByeT0iMTYiIGZpbGw9InVybCgjY2FyZEdyYWRpZW50KSIgc3Ryb2tlPSIjOTRhM2I4IiBzdHJva2Utb3BhY2l0eT0iMC4zNSIgc3Ryb2tlLXdpZHRoPSIyIiAvPgogIDxjaXJjbGUgY3g9IjYwIiBjeT0iODAiIHI9IjI2IiBmaWxsPSIjZmZmZmZmMjAiIC8+CiAgPGNpcmNsZSBjeD0iNjAiIGN5PSI4MCIgcj0iMTYiIGZpbGw9IiNmZmZmZmYzNSIgLz4KPC9nPgo8cmVjdCB4PSIxMCIgeT0iMTAiIHdpZHRoPSIxMDAiIGhlaWdodD0iMTQwIiByeD0iMTYiIHJ5PSIxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utb3BhY2l0eT0iMC4zIiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KPHRleHQgeD0iNjAiIHk9IjQ1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjIyIiBmaWxsPSIjZTJlOGYwIiBmb250LWZhbWlseT0iU2Vnb2UgVUkgRW1vamkiPuKZpjwvdGV4dD4KPHRleHQgeD0iNjAiIHk9IjEyNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2UyZThmMCIgZm9udC1mYW1pbHk9IlNlZ29lIFVJIEVtb2ppIj7imaM8L3RleHQ+Cjwvc3ZnPg==";
+
 function AuthScreen(props: {
   mode: "signin" | "signup";
   onToggleMode: (mode: "signin" | "signup") => void;
@@ -2396,9 +2525,44 @@ function AuthScreen(props: {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
+
+  const uploadAvatarForSignup = async (file: File, accessToken: string) => {
+    try {
+      const fileExt = (file.name.split(".").pop() || "png").toLowerCase();
+      const response = await fetch(`${config.backendUrl}/avatar/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken, fileExt }),
+      });
+      const payload = await response
+        .json()
+        .catch(() => ({ error: "Réponse invalide du serveur." }));
+      if (!response.ok || !payload?.uploadUrl || !payload?.publicUrl) {
+        throw new Error(payload?.error ?? "Impossible de préparer l'upload.");
+      }
+      const uploadResponse = await fetch(payload.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error("Le téléversement a échoué.");
+      }
+      return payload.publicUrl as string;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Impossible d'uploader l'avatar.";
+      onError(message);
+      return null;
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2416,6 +2580,22 @@ function AuthScreen(props: {
         onError(signInError.message);
       }
     } else {
+      try {
+        const checkResponse = await fetch(
+          `${config.backendUrl}/auth/check-email?email=${encodeURIComponent(email)}`
+        );
+        if (checkResponse.ok) {
+          const payload: { exists?: boolean } = await checkResponse.json();
+          if (payload.exists) {
+            onError("Cette adresse email est déjà utilisée.");
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Email check failed", err);
+      }
+
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -2427,10 +2607,20 @@ function AuthScreen(props: {
         onError(signUpError.message);
       } else {
         if (data.user) {
+          let finalAvatarUrl: string | null = null;
+          if (data.session?.access_token && avatarFile) {
+            const uploaded = await uploadAvatarForSignup(
+              avatarFile,
+              data.session.access_token
+            );
+            if (uploaded) {
+              finalAvatarUrl = uploaded;
+            }
+          }
           await supabase.from("profiles").upsert({
             id: data.user.id,
             username: username || email,
-            avatar_url: avatarUrl.trim() || null,
+            avatar_url: finalAvatarUrl,
             wins: 0,
             games: 0,
           });
@@ -2443,97 +2633,171 @@ function AuthScreen(props: {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-12 font-sans text-slate-100">
-      <div className="w-full max-w-lg rounded-[2.5rem] border border-slate-700 bg-slate-900/80 p-10 shadow-[0_35px_70px_-35px_rgba(0,0,0,1)]">
-        <div className="flex justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-              Belote Live
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold text-white">
-              {mode === "signin" ? "Connexion" : "Créer un compte"}
-            </h1>
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-[#041826] to-slate-950 px-6 py-12 font-sans text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.15),_transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(56,189,248,0.12),_transparent_60%)]" />
+      <div
+        className="pointer-events-none absolute left-8 top-16 hidden rotate-[-12deg] opacity-50 lg:block"
+        style={{ filter: "drop-shadow(0 25px 35px rgba(6,182,212,0.25))" }}
+      >
+        <img src={CARD_OVERLAY_SVG} alt="" className="h-48 w-auto" />
+      </div>
+      <div
+        className="pointer-events-none absolute bottom-10 right-10 hidden rotate-[8deg] opacity-60 lg:block"
+        style={{ filter: "drop-shadow(0 30px 40px rgba(16,185,129,0.25))" }}
+      >
+        <img src={CARD_OVERLAY_SVG} alt="" className="h-44 w-auto" />
+      </div>
+      <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] items-center justify-center">
+        <div className="grid w-full max-w-6xl gap-8 lg:grid-cols-[1.05fr_0.85fr]">
+          <div className="rounded-[2.5rem] border border-slate-800/70 bg-slate-950/85 p-10 shadow-[0_35px_80px_-45px_rgba(0,0,0,1)] backdrop-blur">
+            <div className="flex items-start justify-between gap-6">
+              <div>
+                <p className="text-[0.6rem] uppercase tracking-[0.55em] text-emerald-300/80">
+                  Belote Live
+                </p>
+                <h1 className="mt-3 text-4xl font-semibold text-white">
+                  {mode === "signin" ? "Connexion" : "Créez votre compte"}
+                </h1>
+                <p className="mt-2 text-sm text-slate-400">
+                  Sauvegardez vos stats, vos avatars et retrouvez vos partenaires de jeu.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggleMode(mode === "signin" ? "signup" : "signin")}
+                className="rounded-full border border-slate-600/60 px-4 py-2 text-[0.6rem] uppercase tracking-[0.4em] text-slate-200 transition hover:border-slate-300"
+              >
+                {mode === "signin" ? "Inscription" : "Connexion"}
+              </button>
+            </div>
+            {error && (
+              <p className="mt-6 rounded-2xl border border-rose-400/60 bg-rose-500/15 px-4 py-3 text-xs text-rose-100">
+                {error}
+              </p>
+            )}
+            {info && (
+              <p className="mt-6 rounded-2xl border border-amber-300/60 bg-amber-500/15 px-4 py-3 text-xs text-amber-200">
+                {info}
+              </p>
+            )}
+            <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+              <label className="flex flex-col gap-2 text-sm text-slate-200">
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300/50"
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm text-slate-200">
+                Mot de passe
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                />
+              </label>
+              {mode === "signup" && (
+                <>
+                  <label className="flex flex-col gap-2 text-sm text-slate-200">
+                    Pseudo public
+                    <input
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300/40"
+                      placeholder="BeloteMaster"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm text-slate-200">
+                    Avatar (upload)
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        setAvatarFile(file);
+                      }}
+                      className="rounded-2xl border border-dashed border-emerald-400/50 bg-slate-900/70 px-4 py-3 text-xs text-emerald-100 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-500/20 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-emerald-100"
+                    />
+                    {avatarFile && (
+                      <span className="text-[0.65rem] uppercase tracking-[0.45em] text-emerald-200">
+                        {avatarFile.name}
+                      </span>
+                    )}
+                  </label>
+                </>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-400 via-emerald-400 to-green-400 px-4 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-slate-900 transition hover:brightness-110 disabled:opacity-50"
+              >
+                {loading ? "Patientez..." : mode === "signin" ? "Se connecter" : "Créer un compte"}
+              </button>
+            </form>
+            <div className="mt-8 space-y-3">
+              <button
+                type="button"
+                onClick={onContinueAsGuest}
+                className="group flex w-full items-center justify-between rounded-2xl border border-cyan-400/50 bg-slate-900/70 px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-100 transition hover:border-cyan-200 hover:bg-slate-900/60"
+              >
+                <span>Jouer en invité</span>
+                <span className="text-base transition group-hover:translate-x-1">→</span>
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => onToggleMode(mode === "signin" ? "signup" : "signin")}
-            className="text-xs uppercase tracking-[0.35em] text-emerald-300"
-          >
-            {mode === "signin" ? "Nouveau ? S'inscrire" : "Déjà inscrit ? Se connecter"}
-          </button>
-        </div>
-        {error && (
-          <p className="mt-4 rounded-xl border border-rose-400/60 bg-rose-900/40 px-4 py-2 text-xs text-rose-100">
-            {error}
-          </p>
-        )}
-        {info && (
-          <p className="mt-4 rounded-xl border border-amber-300/60 bg-amber-900/30 px-4 py-2 text-xs text-amber-200">
-            {info}
-          </p>
-        )}
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <label className="flex flex-col gap-2 text-sm text-slate-200">
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
-            />
-          </label>
-          <label className="flex flex-col gap-2 text-sm text-slate-200">
-            Mot de passe
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
-            />
-          </label>
-          {mode === "signup" && (
-            <>
-              <label className="flex flex-col gap-2 text-sm text-slate-200">
-                Pseudo
-                <input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400"
-                  placeholder="BeloteMaster"
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm text-slate-200">
-                Avatar (URL)
-                <input
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400"
-                  placeholder="https://..."
-                />
-              </label>
-            </>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-4 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white disabled:opacity-50"
-          >
-            {loading ? "Patientez..." : mode === "signin" ? "Se connecter" : "Créer un compte"}
-          </button>
-        </form>
-        <div className="mt-8 space-y-2">
-          <button
-            type="button"
-            onClick={onContinueAsGuest}
-            className="w-full rounded-2xl border border-cyan-400/50 bg-slate-950/60 px-4 py-3 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-100 transition hover:border-cyan-200/70 hover:text-white"
-          >
-            Jouer en invité
-          </button>
-          <p className="text-center text-[0.6rem] uppercase tracking-[0.35em] text-slate-500">
-            Avatar stylisé attribué automatiquement
-          </p>
+          <div className="relative overflow-hidden rounded-[2.5rem] border border-emerald-400/25 bg-gradient-to-br from-emerald-400/10 via-cyan-400/5 to-transparent p-10 text-slate-50 shadow-[0_35px_80px_-45px_rgba(16,185,129,0.6)]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(16,185,129,0.3),transparent_55%)] opacity-70" />
+            <div className="pointer-events-none absolute -left-8 top-10 hidden rotate-[12deg] opacity-60 md:block">
+              <img src={CARD_OVERLAY_SVG} alt="" className="h-28 w-auto" />
+            </div>
+            <div className="pointer-events-none absolute -right-4 bottom-6 hidden rotate-[-10deg] opacity-60 md:block">
+              <img src={CARD_OVERLAY_SVG} alt="" className="h-24 w-auto" />
+            </div>
+            <div className="relative flex h-full flex-col gap-8">
+              <header>
+                <p className="text-xs uppercase tracking-[0.6em] text-emerald-200/80">
+                  Belote Live
+                </p>
+                <h2 className="mt-3 text-4xl font-semibold text-white">
+                  Le tapis digital des clubs de belote
+                </h2>
+                <p className="mt-3 text-sm text-emerald-50/80 leading-relaxed">
+                  Interface stylée, avatars personnalisés, annonces animées et classements persistants : tout ce qu’il faut pour vos soirées belote.
+                </p>
+              </header>
+              <div className="grid gap-5 sm:grid-cols-2">
+                {[
+                  {
+                    title: "Tables privées",
+                    desc: "Créez un code, partagez-le instantanément et lancez la donne avec vos partenaires.",
+                  },
+                  {
+                    title: "Stats et profils",
+                    desc: "Winrate, séries de victoires et avatars synchronisés pour chaque joueur.",
+                  },
+                  {
+                    title: "Animations",
+                    desc: "Emoji, annonces Belote/Rebelote et tapis qui s’illuminent.",
+                  },
+                  {
+                    title: "Cross-device",
+                    desc: "Pensé pour votre ordi, mais aussi tablette et mobile.",
+                  },
+                ].map((feature) => (
+                  <div key={feature.title} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm backdrop-blur">
+                    <p className="text-xs uppercase tracking-[0.4em] text-emerald-200/80">{feature.title}</p>
+                    <p className="mt-2 text-emerald-50/90">{feature.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
