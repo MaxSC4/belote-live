@@ -126,6 +126,9 @@ function App() {
 
   // Tri
   const [isSorting, setIsSorting] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(true);
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   // ---- LOBBY ----
 
@@ -348,6 +351,147 @@ function App() {
     }));
   }, [gameState?.trick, seatToTablePosition]);
 
+  const sidebarContent = (
+    <div className="space-y-3">
+      <h2 className="text-base font-medium text-white">Joueurs</h2>
+
+      {roomPlayers.length === 0 && !wsError && (
+        <p className="text-slate-400">En attente d&apos;autres joueurs...</p>
+      )}
+
+      <ul className="flex list-none flex-col gap-2">
+        {roomPlayers.map((player) => {
+          const isCurrent =
+            !!gameState &&
+            player.seat !== null &&
+            player.seat === gameState.currentPlayer;
+          const isYou = player.nickname === nickname;
+
+          return (
+            <li
+              key={player.id}
+              className={cx(
+                "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                isCurrent
+                  ? "border-emerald-400/60 bg-emerald-500/10"
+                  : "border-slate-500/40 bg-slate-900/80"
+              )}
+            >
+              <div>
+                <span className="text-slate-100">
+                  {player.nickname}
+                  {isYou && <span className="text-indigo-200"> (vous)</span>}
+                  {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
+                </span>
+                {isCurrent && (
+                  <span className="ml-2 text-xs text-emerald-300">
+                    tour de jeu
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-slate-500">
+                {player.id.slice(-4)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      {gameState && (
+        <div className="space-y-3 rounded-2xl border border-slate-500/40 bg-slate-900/85 px-3 py-4">
+          <div className="rounded-xl border border-emerald-400/40 bg-gradient-to-r from-emerald-900/40 to-emerald-700/20 p-3 text-xs uppercase tracking-widest text-emerald-100">
+            <p className="mb-2 flex items-center justify-between text-[0.65rem] text-emerald-200">
+              <span>Score de la donne</span>
+              <span className="text-[0.6rem] text-emerald-300/80">
+                manche {currentDealNumber}
+              </span>
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-base font-semibold text-white">
+              <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
+                <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
+                  {shortSeatLabel(0)}·{shortSeatLabel(2)}
+                </p>
+                <p className="text-2xl">{gameState.scores.team0}</p>
+                <p className="text-[0.6rem] text-emerald-100/70">pts</p>
+              </div>
+              <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
+                <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
+                  {shortSeatLabel(1)}·{shortSeatLabel(3)}
+                </p>
+                <p className="text-2xl">{gameState.scores.team1}</p>
+                <p className="text-[0.6rem] text-emerald-100/70">pts</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-300/40 bg-gradient-to-b from-slate-950/40 to-amber-900/10 p-3">
+            <div className="mb-2 flex items-center justify-between text-[0.65rem] uppercase tracking-[0.35em] text-amber-200">
+              <span>Scores cumulés</span>
+              <span>match</span>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
+                  <span>
+                    {shortSeatLabel(0)} &amp; {shortSeatLabel(2)}
+                  </span>
+                  <span className="text-base font-semibold text-white">
+                    {matchTeam0} pts
+                  </span>
+                </div>
+                <div className="mt-1 h-2 rounded-full bg-slate-800/70">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
+                    style={{ width: `${team0Progress}%` }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
+                  <span>
+                    {shortSeatLabel(1)} &amp; {shortSeatLabel(3)}
+                  </span>
+                  <span className="text-base font-semibold text-white">
+                    {matchTeam1} pts
+                  </span>
+                </div>
+                <div className="mt-1 h-2 rounded-full bg-slate-800/70">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
+                    style={{ width: `${team1Progress}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {gameState.belote.stage > 0 && (
+            <div className="rounded-xl border border-amber-200/50 bg-amber-500/10 px-3 py-2 text-[0.7rem] text-amber-100">
+              <p className="flex items-center gap-1">
+                <span>🎖</span>
+                <span>
+                  {gameState.belote.stage === 1
+                    ? "Belote annoncée par "
+                    : "Belote & rebelote annoncées par "}
+                  {gameState.belote.holder !== null &&
+                    shortSeatLabel(gameState.belote.holder)}
+                  {gameState.belote.stage === 2 &&
+                    ` (+${gameState.belote.points} pts)`}
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {wsError && (
+        <div className="rounded-lg border border-rose-400/70 bg-rose-900/50 px-3 py-2 text-xs text-rose-100">
+          {wsError}
+        </div>
+      )}
+    </div>
+  );
+
   // ---- Animations : gagnant de pli & fin de donne ----
 
   useEffect(() => {
@@ -367,6 +511,31 @@ function App() {
     }
     prevPhaseRef.current = phase ?? null;
   }, [gameState?.phase]);
+
+  // ---- Responsive viewport ----
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window === "undefined") return;
+      const { innerWidth: width, innerHeight: height } = window;
+      setIsMobile(width < 1024);
+      setIsLandscape(width >= height);
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.addEventListener("orientationchange", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("orientationchange", updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setShowMobilePanel(false);
+    }
+  }, [isMobile]);
 
   // ---- Animation de distribution de la main ----
 
@@ -597,9 +766,9 @@ function App() {
       </header>
 
       {/* ZONE PRINCIPALE */}
-      <main className="relative mt-2 flex min-h-0 flex-1 gap-4">
+      <main className="relative mt-2 flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         {/* TAPIS */}
-        <section className="relative flex h-full w-full flex-1 flex-col rounded-[1.25rem] border border-slate-500/40 bg-felt px-3 pb-3 pt-2 shadow-table">
+        <section className="relative flex h-full w-full flex-1 flex-col rounded-[1.25rem] border border-slate-500/40 bg-felt px-3 pb-16 pt-2 shadow-table lg:pb-3">
           {gameState && (
             <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-300/40 bg-slate-950/85 px-4 py-2 text-xs uppercase tracking-[0.35em] text-slate-200 shadow-[0_18px_35px_-20px_rgba(0,0,0,0.8)]">
               <div className="flex flex-col">
@@ -638,6 +807,17 @@ function App() {
           {/* Bannière gagnant du pli */}
           {showTrickWinnerBanner && trickWinnerName && (
             <TrickWinnerSpotlight winnerName={trickWinnerName} />
+          )}
+
+          {isMobile && !isLandscape && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-[1.25rem] border border-emerald-400/30 bg-slate-950/95 text-center shadow-[0_45px_90px_-40px_rgba(0,0,0,0.95)]">
+              <p className="text-lg font-semibold text-white">
+                Tournez votre téléphone
+              </p>
+              <p className="text-sm text-slate-300">
+                L&apos;expérience est pensée pour le mode paysage.
+              </p>
+            </div>
           )}
 
           {/* JOUEURS + PLI AU CENTRE */}
@@ -911,141 +1091,8 @@ function App() {
         </section>
 
         {/* SIDEBAR */}
-        <aside className="w-[260px] max-w-[320px] shrink-0 space-y-3 rounded-xl border border-slate-500/40 bg-slate-950/95 p-3 text-sm shadow-panel">
-          <h2 className="text-base font-medium text-white">Joueurs</h2>
-
-          {roomPlayers.length === 0 && !wsError && (
-            <p className="text-slate-400">En attente d&apos;autres joueurs...</p>
-          )}
-
-          <ul className="flex list-none flex-col gap-2">
-            {roomPlayers.map((player) => {
-              const isCurrent =
-                !!gameState &&
-                player.seat !== null &&
-                player.seat === gameState.currentPlayer;
-              const isYou = player.nickname === nickname;
-
-              return (
-                <li
-                  key={player.id}
-                  className={cx(
-                    "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
-                    isCurrent
-                      ? "border-emerald-400/60 bg-emerald-500/10"
-                      : "border-slate-500/40 bg-slate-900/80"
-                  )}
-                >
-                  <div>
-                    <span className="text-slate-100">
-                      {player.nickname}
-                      {isYou && <span className="text-indigo-200"> (vous)</span>}
-                      {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
-                    </span>
-                    {isCurrent && (
-                      <span className="ml-2 text-xs text-emerald-300">
-                        tour de jeu
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-500">{player.id.slice(-4)}</span>
-                </li>
-              );
-            })}
-          </ul>
-
-          {gameState && (
-            <div className="space-y-3 rounded-2xl border border-slate-500/40 bg-slate-900/85 px-3 py-4">
-              <div className="rounded-xl border border-emerald-400/40 bg-gradient-to-r from-emerald-900/40 to-emerald-700/20 p-3 text-xs uppercase tracking-widest text-emerald-100">
-                <p className="mb-2 flex items-center justify-between text-[0.65rem] text-emerald-200">
-                  <span>Score de la donne</span>
-                  <span className="text-[0.6rem] text-emerald-300/80">
-                    manche {currentDealNumber}
-                  </span>
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-base font-semibold text-white">
-                  <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
-                    <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
-                      {shortSeatLabel(0)}·{shortSeatLabel(2)}
-                    </p>
-                    <p className="text-2xl">{gameState.scores.team0}</p>
-                    <p className="text-[0.6rem] text-emerald-100/70">pts</p>
-                  </div>
-                  <div className="rounded-lg bg-slate-950/40 px-2 py-2 text-center shadow-inner shadow-black/40">
-                    <p className="text-[0.6rem] uppercase tracking-[0.35em] text-emerald-200">
-                      {shortSeatLabel(1)}·{shortSeatLabel(3)}
-                    </p>
-                    <p className="text-2xl">{gameState.scores.team1}</p>
-                    <p className="text-[0.6rem] text-emerald-100/70">pts</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-amber-300/40 bg-gradient-to-b from-slate-950/40 to-amber-900/10 p-3">
-                <div className="mb-2 flex items-center justify-between text-[0.65rem] uppercase tracking-[0.35em] text-amber-200">
-                  <span>Scores cumulés</span>
-                  <span>match</span>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
-                      <span>
-                        {shortSeatLabel(0)} &amp; {shortSeatLabel(2)}
-                      </span>
-                      <span className="text-base font-semibold text-white">
-                        {matchTeam0} pts
-                      </span>
-                    </div>
-                    <div className="mt-1 h-2 rounded-full bg-slate-800/70">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
-                        style={{ width: `${team0Progress}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between text-[0.65rem] text-amber-100/80">
-                      <span>
-                        {shortSeatLabel(1)} &amp; {shortSeatLabel(3)}
-                      </span>
-                      <span className="text-base font-semibold text-white">
-                        {matchTeam1} pts
-                      </span>
-                    </div>
-                    <div className="mt-1 h-2 rounded-full bg-slate-800/70">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500"
-                        style={{ width: `${team1Progress}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {gameState.belote.stage > 0 && (
-                <div className="rounded-xl border border-amber-200/50 bg-amber-500/10 px-3 py-2 text-[0.7rem] text-amber-100">
-                  <p className="flex items-center gap-1">
-                    <span>🎖</span>
-                    <span>
-                      {gameState.belote.stage === 1
-                        ? "Belote annoncée par "
-                        : "Belote & rebelote annoncées par "}
-                      {gameState.belote.holder !== null &&
-                        shortSeatLabel(gameState.belote.holder)}
-                      {gameState.belote.stage === 2 &&
-                        ` (+${gameState.belote.points} pts)`}
-                    </span>
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {wsError && (
-            <div className="rounded-lg border border-rose-400/70 bg-rose-900/50 px-3 py-2 text-xs text-rose-100">
-              {wsError}
-            </div>
-          )}
+        <aside className="hidden max-w-[320px] shrink-0 rounded-xl border border-slate-500/40 bg-slate-950/95 p-3 text-sm shadow-panel lg:block lg:w-[260px]">
+          {sidebarContent}
         </aside>
 
         {/* OVERLAY SCORE FINAL */}
@@ -1072,6 +1119,42 @@ function App() {
               >
                 OK
               </button>
+            </div>
+          </div>
+        )}
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => setShowMobilePanel(true)}
+            className="fixed bottom-4 right-4 z-30 flex items-center gap-2 rounded-full border border-emerald-300/60 bg-slate-950/90 px-4 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.4em] text-emerald-100 shadow-[0_25px_55px_-30px_rgba(16,185,129,1)] backdrop-blur"
+          >
+            <span>👥</span>
+            <span>Scores</span>
+          </button>
+        )}
+
+        {isMobile && showMobilePanel && (
+          <div className="fixed inset-0 z-40">
+            <div
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+              onClick={() => setShowMobilePanel(false)}
+            />
+            <div className="relative mt-auto max-h-[80vh] rounded-t-3xl border border-slate-500/60 bg-slate-950/95 p-5 text-sm shadow-[0_-25px_60px_-30px_rgba(0,0,0,0.9)]">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+                  Joueurs &amp; scores
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowMobilePanel(false)}
+                  className="rounded-full border border-slate-600/70 px-3 py-1 text-xs text-slate-300"
+                >
+                  Fermer
+                </button>
+              </div>
+              <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+                {sidebarContent}
+              </div>
             </div>
           </div>
         )}
