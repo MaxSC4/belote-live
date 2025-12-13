@@ -679,27 +679,7 @@ function App() {
     if (!playerHandRef.current) return;
     const cards = playerHandRef.current.querySelectorAll(".player-hand-card");
     if (!cards.length) return;
-    anime.remove(cards);
-    if (isSorting) {
-      anime.remove(cards);
-      anime({
-        targets: cards,
-        delay: anime.stagger(30),
-        duration: 360,
-        easing: "easeOutCubic",
-        translateY: [
-          { value: -8 },
-          { value: 0 },
-        ],
-        scale: [
-          { value: 1.03 },
-          { value: 1 },
-        ],
-      });
-      return;
-    }
-
-    if (incomingCardsRef.current > 0) {
+    if (!isSorting && incomingCardsRef.current > 0) {
       const newestCard = cards[cards.length - 1];
       if (newestCard) {
         anime.remove(newestCard);
@@ -1928,7 +1908,7 @@ function App() {
                     onMouseLeave={() =>
                       setHoveredIndex((prev) => (prev === index ? null : prev))
                     }
-                    className="player-hand-card absolute left-1/2 bottom-0 transform-gpu focus:outline-none"
+                    className="player-hand-card absolute left-1/2 bottom-0 -translate-x-1/2 transform-gpu focus:outline-none"
                     style={{
                       transform: finalTransform,
                       transformOrigin: "50% 100%",
