@@ -12,6 +12,7 @@ import ReactionBubble from "./components/game/ReactionBubble";
 import SeatBanner from "./components/game/SeatBanner";
 import TrickCardView from "./components/game/TrickCardView";
 import TrickWinnerSpotlight from "./components/game/TrickWinnerSpotlight";
+import { Crown, Shuffle, Smile } from "lucide-react";
 import CardSvg from "./components/game/cards/CardSvg";
 import ProfileModal from "./components/profile/ProfileModal";
 import ProfileSetupScreen from "./components/profile/ProfileSetupScreen";
@@ -1578,6 +1579,83 @@ function App() {
               )}
             </div>
           )}
+          {gameState && (
+            <div className="pointer-events-auto absolute bottom-4 left-4 z-30">
+              <div className="flex flex-col gap-2 rounded-3xl border border-slate-600/40 bg-slate-950/85 px-4 py-3 shadow-[0_25px_60px_-35px_rgba(0,0,0,0.9)] backdrop-blur-sm">
+                <p className="text-center text-[0.55rem] uppercase tracking-[0.35em] text-slate-500">
+                  Actions
+                </p>
+                <div className="flex items-center gap-3">
+                  {canAnnounceBelote && (
+                    <div className="group relative">
+                      <button
+                        type="button"
+                        onClick={handleAnnounceBelote}
+                        className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-200/60 bg-slate-900/70 text-amber-200 shadow-[0_12px_25px_-18px_rgba(245,158,11,0.7)] transition hover:bg-amber-400/10"
+                        aria-label={beloteButtonLabel}
+                      >
+                        <Crown className="h-5 w-5" />
+                      </button>
+                      <span className="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 rounded-xl bg-slate-900/90 px-2 py-1 text-[0.6rem] text-amber-100 opacity-0 transition duration-200 delay-200 group-hover:translate-y-0 group-hover:opacity-100">
+                        Belote · Rebelote
+                      </span>
+                    </div>
+                  )}
+                  {showSortButton && (
+                    <div className="group relative">
+                      <button
+                        type="button"
+                        onClick={handleSortHand}
+                        className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-200/60 bg-slate-900/80 text-cyan-200 shadow-[0_12px_25px_-18px_rgba(14,165,233,0.6)] transition hover:bg-cyan-400/10"
+                        aria-label="Trier la main"
+                      >
+                        <Shuffle className="h-5 w-5" />
+                      </button>
+                      <span className="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 rounded-xl bg-slate-900/90 px-2 py-1 text-[0.6rem] text-cyan-100 opacity-0 transition duration-200 delay-200 group-hover:translate-y-0 group-hover:opacity-100">
+                        Ordonner
+                      </span>
+                    </div>
+                  )}
+                  <div className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowReactionPicker((prev) => !prev)}
+                      className={cx(
+                        "flex h-12 w-12 items-center justify-center rounded-2xl border text-lg shadow-[0_12px_25px_-18px_rgba(139,92,246,0.6)] transition",
+                        showReactionPicker
+                          ? "border-violet-300 bg-violet-500/30 text-violet-50"
+                          : "border-violet-300/70 bg-slate-900/70 text-violet-100 hover:bg-violet-400/10"
+                      )}
+                      aria-label="Réactions"
+                    >
+                      <Smile className="h-5 w-5" />
+                    </button>
+                    <span className="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 rounded-xl bg-slate-900/90 px-2 py-1 text-[0.6rem] text-violet-100 opacity-0 transition duration-200 delay-200 group-hover:translate-y-0 group-hover:opacity-100">
+                      Réactions
+                    </span>
+                    {showReactionPicker && (
+                      <div className="absolute bottom-full left-0 z-30 mb-3 w-48 rounded-3xl border border-violet-300/50 bg-slate-950/95 p-3 text-left shadow-[0_25px_60px_-30px_rgba(139,92,246,0.7)]">
+                        <div className="grid grid-cols-3 gap-2">
+                          {REACTION_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleSendReaction(emoji)}
+                              className="flex aspect-square items-center justify-center rounded-2xl border border-slate-600/60 bg-slate-900/70 text-xl transition hover:border-violet-300"
+                              aria-label={`Emoji ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Bannière gagnant du pli */}
           {showTrickWinnerBanner && trickWinnerName && (
             <TrickWinnerSpotlight winnerName={trickWinnerName} />
@@ -1797,70 +1875,6 @@ function App() {
 
           {/* MAIN EN ÉVENTAIL */}
           <div className="mt-6 flex flex-col px-2 text-slate-100">
-            <div className="mx-auto mb-3 flex w-full max-w-lg flex-wrap items-center justify-center gap-2 text-sm">
-          {gameState && canAnnounceBelote && (
-            <button
-              type="button"
-              onClick={handleAnnounceBelote}
-              className="group flex items-center gap-2 rounded-full border border-amber-300/70 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-300 px-4 py-1.5 font-semibold text-slate-900 shadow-[0_14px_30px_-18px_rgba(251,191,36,0.9)] transition hover:scale-105"
-            >
-              <span className="text-base">🎺</span>
-              <span className="text-xs font-bold uppercase tracking-[0.25em]">
-                {beloteButtonLabel}
-              </span>
-            </button>
-          )}
-
-          {gameState && showSortButton && (
-            <button
-              type="button"
-              onClick={handleSortHand}
-              className="group flex items-center gap-2 rounded-full border border-cyan-300/60 bg-slate-950/80 px-4 py-1.5 font-semibold text-cyan-100 shadow-[0_12px_25px_-16px_rgba(16,185,129,0.9)] transition hover:border-cyan-200"
-            >
-              <span className="text-base">🪄</span>
-              <span className="text-xs font-bold uppercase tracking-[0.25em]">
-                Trier la main
-              </span>
-            </button>
-          )}
-
-          {gameState && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowReactionPicker((prev) => !prev)}
-                className={cx(
-                  "flex h-11 w-11 items-center justify-center rounded-full border text-2xl transition shadow-[0_12px_25px_-16px_rgba(168,85,247,0.9)]",
-                  showReactionPicker
-                    ? "border-violet-300 bg-violet-500/30 text-violet-50"
-                    : "border-violet-300/60 bg-slate-950/80 text-violet-100 hover:border-violet-200"
-                )}
-                aria-label="Réactions"
-              >
-                😊
-              </button>
-
-              {showReactionPicker && (
-                <div className="absolute left-1/2 top-full z-20 mt-3 w-[220px] -translate-x-1/2 rounded-3xl border border-violet-300/50 bg-slate-950/95 p-4 text-left shadow-[0_25px_60px_-30px_rgba(139,92,246,0.7)]">
-                  <div className="grid grid-cols-3 gap-3">
-                    {REACTION_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => handleSendReaction(emoji)}
-                        className="flex aspect-square items-center justify-center rounded-2xl border border-slate-600/60 bg-slate-900/70 text-2xl transition hover:border-violet-300"
-                        aria-label={`Emoji ${emoji}`}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
             <div className="mb-2 flex flex-wrap items-center justify-center gap-3 text-center text-sm font-semibold uppercase tracking-wide text-slate-200">
               <span className="text-base tracking-[0.35em]">Votre main</span>
               {isMyTurn && (
