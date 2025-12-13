@@ -1,13 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { config } from "./config";
 import type { Card, GameStateWS, Suit } from "./gameTypes";
+import { supabase } from "./lib/supabaseClient";
 
 type View = "lobby" | "game";
+
+interface PlayerStatsPayload {
+  wins: number;
+  games: number;
+  winrate: number;
+}
 
 interface RoomPlayer {
   id: string;
   nickname: string;
   seat: number | null;
+  userId?: string | null;
+  avatarUrl?: string | null;
+  stats?: PlayerStatsPayload;
+}
+
+interface UserProfile {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  wins: number;
+  games: number;
 }
 
 type RoomUpdateMessage = {
@@ -132,12 +151,51 @@ function App() {
   const [isLandscape, setIsLandscape] = useState(true);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ username: "", avatarUrl: "" });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const supabaseReady = Boolean(supabase);
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session ?? null);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   // ---- LOBBY ----
 
   const handleJoin = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!nickname || !roomCode) return;
+    if (!session?.access_token || !roomCode) return;
+    setNickname(profile?.username ?? nickname);
     setView("game");
   };
 
@@ -166,6 +224,11 @@ function App() {
       return;
     }
 
+    if (!session?.access_token) {
+      setWsError("Session Supabase manquante.");
+      return;
+    }
+
     setWsStatus("connecting");
     setWsError(null);
 
@@ -177,7 +240,7 @@ function App() {
       ws.send(
         JSON.stringify({
           type: "join_room",
-          payload: { roomCode, nickname },
+          payload: { roomCode, nickname, accessToken: session.access_token },
         })
       );
     };
@@ -215,11 +278,124 @@ function App() {
     return () => {
       ws.close();
     };
-  }, [view, roomCode, nickname]);
+  }, [view, roomCode, nickname, session?.access_token]);
 
   const handleStartGame = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: "start_game" }));
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setRoomCode("");
+    setView("lobby");
+  };
+
+  const handleProfileFieldChange = (field: "username" | "avatarUrl", value: string) => {
+    setProfileForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveProfile = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!supabase || !session) return;
+    const username = profileForm.username.trim();
+    if (!username) return;
+    setProfileSaving(true);
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({
+        id: session.user.id,
+        username,
+        avatar_url: profileForm.avatarUrl.trim() || null,
+      });
+    setProfileSaving(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    const updated: UserProfile = {
+      id: session.user.id,
+      username,
+      avatar_url: profileForm.avatarUrl.trim() || null,
+      wins: profile?.wins ?? 0,
+      games: profile?.games ?? 0,
+    };
+    setProfile(updated);
+    setNickname(updated.username);
+    setShowProfileModal(false);
+    setAuthError(null);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "sync_profile",
+          payload: { accessToken: session.access_token },
+        })
+      );
+    }
+  };
+
+  const handleAvatarUpload = async (file: File) => {
+    if (!supabase || !session) return;
+    setAvatarUploading(true);
+    setAuthError(null);
+    try {
+      const fileExt = (file.name.split(".").pop() || "png").toLowerCase();
+      const response = await fetch(`${config.backendUrl}/avatar/upload-url`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accessToken: session.access_token,
+          fileExt,
+        }),
+      });
+      const payload = await response
+        .json()
+        .catch(() => ({ error: "Réponse invalide du serveur." }));
+
+      if (!response.ok || !payload?.uploadUrl || !payload?.publicUrl) {
+        throw new Error(payload?.error ?? "Impossible de préparer l'upload.");
+      }
+
+      const uploadResponse = await fetch(payload.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Le téléversement a échoué.");
+      }
+
+      const publicUrl: string = payload.publicUrl;
+      setProfileForm((prev) => ({ ...prev, avatarUrl: publicUrl }));
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl })
+        .eq("id", session.user.id);
+      if (updateError) {
+        throw updateError;
+      }
+      setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "sync_profile",
+            payload: { accessToken: session.access_token },
+          })
+        );
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Impossible d'uploader l'avatar.";
+      setAuthError(message);
+    } finally {
+      setAvatarUploading(false);
+    }
   };
 
   // ---- INFOS JOUEURS / TABLE ----
@@ -421,28 +597,32 @@ function App() {
                   : "border-slate-500/40 bg-slate-900/80"
               )}
             >
-              <div>
-                <div className="flex flex-wrap items-center gap-2 text-slate-100">
-                  <span>
-                    {player.nickname}
-                    {isYou && <span className="text-indigo-200"> (vous)</span>}
-                    {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
-                  </span>
-                  {reaction && (
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/10 text-base leading-none text-emerald-100">
-                      {reaction.emoji}
+              <div className="flex flex-1 items-center gap-3">
+                <AvatarCircle avatarUrl={player.avatarUrl} fallback={player.nickname} />
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-slate-100">
+                    <span>
+                      {player.nickname}
+                      {isYou && <span className="text-indigo-200"> (vous)</span>}
+                      {player.seat !== null && ` — ${shortSeatLabel(player.seat)}`}
                     </span>
+                    {reaction && (
+                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/10 text-base leading-none text-emerald-100">
+                        {reaction.emoji}
+                      </span>
+                    )}
+                  </div>
+                  {player.stats && (
+                    <p className="text-[0.6rem] uppercase tracking-[0.35em] text-slate-500">
+                      {Math.round(player.stats.winrate * 100)}% WR · {player.stats.wins}W
+                    </p>
+                  )}
+                  {isCurrent && (
+                    <span className="text-xs text-emerald-300">tour de jeu</span>
                   )}
                 </div>
-                {isCurrent && (
-                  <span className="ml-2 text-xs text-emerald-300">
-                    tour de jeu
-                  </span>
-                )}
               </div>
-              <span className="text-xs text-slate-500">
-                {player.id.slice(-4)}
-              </span>
+              <span className="text-xs text-slate-500">{player.id.slice(-4)}</span>
             </li>
           );
         })}
@@ -648,6 +828,81 @@ function App() {
     prevHandRef.current = full;
   }, [gameState, mySeat]);
 
+  useEffect(() => {
+    const supabaseClient = supabase;
+    if (!supabaseClient || !session) {
+      setProfile(null);
+      setProfileForm({ username: "", avatarUrl: "" });
+      if (!session) {
+        setNickname("");
+      }
+      return;
+    }
+
+    let active = true;
+    setProfileLoading(true);
+
+    const fetchProfile = async () => {
+      try {
+        const { data, error } = await supabaseClient
+          .from("profiles")
+          .select("id, username, avatar_url, wins, games")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        if (error) {
+          setProfile(null);
+          setAuthError(error.message);
+          return;
+        }
+
+        if (data) {
+          const normalized: UserProfile = {
+            id: data.id,
+            username: data.username ?? session.user.email ?? "Player",
+            avatar_url: data.avatar_url ?? null,
+            wins: data.wins ?? 0,
+            games: data.games ?? 0,
+          };
+          setProfile(normalized);
+          setProfileForm({
+            username: normalized.username,
+            avatarUrl: normalized.avatar_url ?? "",
+          });
+          setNickname(normalized.username);
+          setAuthError(null);
+        }
+      } finally {
+        if (active) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    fetchProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const selfPlayer = roomPlayers.find(
+      (player) => player.userId && player.userId === profile.id && player.stats
+    );
+    if (selfPlayer?.stats) {
+      const { wins, games } = selfPlayer.stats;
+      if (wins !== profile.wins || games !== profile.games) {
+        setProfile((prev) =>
+          prev ? { ...prev, wins, games } : prev
+        );
+      }
+    }
+  }, [roomPlayers, profile]);
+
   // ---- Choix d'atout (prise / passe) ----
 
   const isFirstRound = gameState?.phase === "ChoosingTrumpFirstRound";
@@ -680,69 +935,147 @@ function App() {
 
   // ---------- LOBBY ----------
 
-  if (view === "lobby") {
+  if (!supabaseReady) {
     return (
-      <div className="min-h-screen bg-lobby px-6 py-10 font-sans text-slate-100">
-        <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-4xl flex-col justify-center">
-          <div className="rounded-[2.5rem] border border-slate-400/30 bg-slate-950/95 p-12 shadow-[0_35px_70px_-30px_rgba(0,0,0,0.85)]">
-            <div className="flex items-center justify-between gap-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-                  Lobby
-                </p>
-                <h2 className="mt-2 text-3xl font-semibold text-white">
-                  Créez ou rejoignez une table
-                </h2>
-                <p className="text-sm text-slate-400">
-                  Code personnalisé ? Partagez-le aux collègues et lancez la donne.
-                </p>
-              </div>
-              <span className="hidden rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200 lg:block">
-                4 joueurs
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleCreateRoom}
-              className="mt-6 w-full rounded-2xl border border-cyan-300/40 bg-gradient-to-r from-cyan-400/20 via-emerald-300/10 to-sky-400/30 px-5 py-3 text-base font-semibold text-cyan-100 transition hover:border-cyan-200/70 hover:text-cyan-50"
-            >
-              Générer un code de table aléatoire
-            </button>
-
-            <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
-              <label className="flex flex-col gap-2 text-sm">
-                <span className="text-slate-300">Pseudo</span>
-                <input
-                  id="nickname"
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  placeholder="Ex : Nono, Cheblan, Elo, Spider-Man..."
-                  className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
-                />
-              </label>
-
-              <label className="flex flex-col gap-2 text-sm">
-                <span className="text-slate-300">Code de table</span>
-                <input
-                  id="roomCode"
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                  placeholder="Ex : TABLE42"
-                  className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-300"
-                />
-              </label>
-
-              <button
-                type="submit"
-                className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-5 py-4 text-base font-semibold text-white transition hover:from-emerald-400 hover:via-green-500 hover:to-emerald-300"
-              >
-                Rejoindre la table
-              </button>
-            </form>
-          </div>
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-center text-slate-100">
+        <div>
+          <p className="text-lg font-semibold">Supabase n&apos;est pas configuré.</p>
+          <p className="mt-2 text-sm text-slate-400">
+            Renseignez <code className="font-mono">VITE_SUPABASE_URL</code> et <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.
+          </p>
         </div>
       </div>
+    );
+  }
+
+  if (authLoading || profileLoading) {
+    return <FullScreenLoader message="Connexion en cours..." />;
+  }
+
+  if (!session) {
+    return (
+      <AuthScreen
+        mode={authMode}
+        onToggleMode={setAuthMode}
+        error={authError}
+        onError={setAuthError}
+      />
+    );
+  }
+
+  if (!profile) {
+    return (
+      <ProfileSetupScreen
+        values={profileForm}
+        onChange={handleProfileFieldChange}
+        onSubmit={handleSaveProfile}
+        saving={profileSaving}
+        error={authError}
+        onUploadAvatar={handleAvatarUpload}
+        uploadingAvatar={avatarUploading}
+      />
+    );
+  }
+
+  const profileWinrate =
+    profile.games > 0 ? Math.round((profile.wins / profile.games) * 100) : 0;
+
+  const profileQuickAccess =
+    profile &&
+    (
+      <button
+        type="button"
+        onClick={() => setShowProfileModal(true)}
+        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-cyan-300/50 bg-slate-950/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-100 shadow-[0_25px_50px_-12px_rgba(15,23,42,0.9)] backdrop-blur-sm transition hover:border-cyan-200 hover:text-cyan-50"
+      >
+        <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} size="sm" />
+        Profil
+      </button>
+    );
+
+  const profileModal =
+    profile &&
+    showProfileModal && (
+      <ProfileModal
+        values={profileForm}
+        onChange={handleProfileFieldChange}
+        onClose={() => setShowProfileModal(false)}
+        onSubmit={handleSaveProfile}
+        saving={profileSaving}
+        onUploadAvatar={handleAvatarUpload}
+        uploadingAvatar={avatarUploading}
+      />
+    );
+
+  if (view === "lobby") {
+    return (
+      <>
+        <div className="min-h-screen bg-lobby px-6 py-10 font-sans text-slate-100">
+          <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-4xl flex-col justify-center">
+            <div className="rounded-[2.5rem] border border-slate-400/30 bg-slate-950/95 p-12 shadow-[0_35px_70px_-30px_rgba(0,0,0,0.85)]">
+              <div className="flex items-center justify-between gap-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+                    Lobby
+                  </p>
+                  <h2 className="mt-2 text-3xl font-semibold text-white">
+                    Créez ou rejoignez une table
+                  </h2>
+                  <p className="text-sm text-slate-400">
+                    Code personnalisé ? Partagez-le aux collègues et lancez la donne.
+                  </p>
+                </div>
+                <span className="hidden rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200 lg:block">
+                  4 joueurs
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCreateRoom}
+                className="mt-6 w-full rounded-2xl border border-cyan-300/40 bg-gradient-to-r from-cyan-400/20 via-emerald-300/10 to-sky-400/30 px-5 py-3 text-base font-semibold text-cyan-100 transition hover:border-cyan-200/70 hover:text-cyan-50"
+              >
+                Générer un code de table aléatoire
+              </button>
+
+              <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
+                <div className="flex items-center gap-4 rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4">
+                  <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
+                  <div className="flex-1">
+                    <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+                      Connecté en tant que
+                    </p>
+                    <p className="text-lg font-semibold text-white">{profile.username}</p>
+                    <p className="text-xs text-slate-400">
+                      {profileWinrate}% WR · {profile.wins} victoires
+                    </p>
+                  </div>
+                </div>
+
+                <label className="flex flex-col gap-2 text-sm">
+                  <span className="text-slate-300">Code de table</span>
+                  <input
+                    id="roomCode"
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                    placeholder="Ex : TABLE42"
+                    className="w-full rounded-2xl border border-slate-500/60 bg-slate-950/75 px-5 py-4 text-base tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-300"
+                  />
+                </label>
+
+                <button
+                  type="submit"
+                  className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-5 py-4 text-base font-semibold text-white transition hover:from-emerald-400 hover:via-green-500 hover:to-emerald-300"
+                >
+                  Rejoindre la table
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {profileQuickAccess}
+        {profileModal}
+      </>
     );
   }
 
@@ -754,6 +1087,7 @@ function App() {
       : "text-slate-100";
 
   return (
+    <>
     <div className="flex min-h-screen flex-col overflow-hidden bg-game px-3 pb-3 pt-4 font-sans text-slate-100 lg:h-screen">
       {/* HEADER */}
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-900 pb-3">
@@ -767,7 +1101,7 @@ function App() {
             </span>
           </div>
           <p className="text-sm text-slate-300">
-            Connecté en tant que <strong>{nickname}</strong>
+            Connecté en tant que <strong>{profile.username}</strong>
             {mySeat !== null && ` (${shortSeatLabel(mySeat)})`}
           </p>
           <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -791,28 +1125,54 @@ function App() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleStartGame}
-            disabled={wsStatus !== "connected"}
-            className={cx(
-              "rounded-full px-4 py-2 text-sm font-medium text-white transition",
-              wsStatus === "connected"
-                ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 hover:from-emerald-400 hover:to-emerald-400"
-                : "cursor-not-allowed bg-slate-600/70"
-            )}
-          >
-            Lancer la partie
-          </button>
+        <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2">
+            <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
+            <div className="text-right">
+              <p className="text-sm font-semibold text-white">{profile.username}</p>
+              <p className="text-xs text-slate-400">
+                {profileWinrate}% WR · {profile.wins} victoires
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="rounded-full border border-slate-600/60 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-300"
+            >
+              Profil
+            </button>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleStartGame}
+              disabled={wsStatus !== "connected"}
+              className={cx(
+                "rounded-full px-4 py-2 text-sm font-medium text-white transition",
+                wsStatus === "connected"
+                  ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 hover:from-emerald-400 hover:to-emerald-400"
+                  : "cursor-not-allowed bg-slate-600/70"
+              )}
+            >
+              Lancer la partie
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setView("lobby")}
-            className="rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
-          >
-            Quitter la table
-          </button>
+            <button
+              type="button"
+              onClick={() => setView("lobby")}
+              className="rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
+            >
+              Quitter la table
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="rounded-full border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-100 transition hover:border-rose-300"
+            >
+              Déconnexion
+            </button>
+          </div>
         </div>
       </header>
 
@@ -874,27 +1234,29 @@ function App() {
           {/* JOUEURS + PLI AU CENTRE */}
           <div className="relative flex-1">
             <div className="grid h-full grid-cols-[1fr_auto_1fr] grid-rows-[auto_1fr_auto] items-center justify-items-center gap-1">
-              <SeatBanner
-                position="top"
-                player={playersByPosition.top}
-                isCurrent={
-                  !!(
-                    gameState &&
-                    playersByPosition.top?.seat === gameState.currentPlayer
-                  )
-                }
-                isTrumpChooser={
-                  playersByPosition.top?.seat !== null &&
-                  playersByPosition.top?.seat === trumpChooserSeat
-                }
-                cardsCount={remainingCardsForSeat(
-                  playersByPosition.top?.seat ?? null
-                )}
-              />
-              <SeatBanner
-                position="left"
-                player={playersByPosition.left}
-                isCurrent={
+            <SeatBanner
+              position="top"
+              player={playersByPosition.top}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.top?.seat === gameState.currentPlayer
+                )
+              }
+              isTrumpChooser={
+                playersByPosition.top?.seat !== null &&
+                playersByPosition.top?.seat === trumpChooserSeat
+              }
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.top?.seat ?? null
+              )}
+              avatarUrl={playersByPosition.top?.avatarUrl}
+              stats={playersByPosition.top?.stats}
+            />
+            <SeatBanner
+              position="left"
+              player={playersByPosition.left}
+              isCurrent={
                   !!(
                     gameState &&
                     playersByPosition.left?.seat === gameState.currentPlayer
@@ -904,13 +1266,15 @@ function App() {
                   playersByPosition.left?.seat !== null &&
                   playersByPosition.left?.seat === trumpChooserSeat
                 }
-                cardsCount={remainingCardsForSeat(
-                  playersByPosition.left?.seat ?? null
-                )}
-              />
-              <SeatBanner
-                position="right"
-                player={playersByPosition.right}
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.left?.seat ?? null
+              )}
+              avatarUrl={playersByPosition.left?.avatarUrl}
+              stats={playersByPosition.left?.stats}
+            />
+            <SeatBanner
+              position="right"
+              player={playersByPosition.right}
                 isCurrent={
                   !!(
                     gameState &&
@@ -921,10 +1285,12 @@ function App() {
                   playersByPosition.right?.seat !== null &&
                   playersByPosition.right?.seat === trumpChooserSeat
                 }
-                cardsCount={remainingCardsForSeat(
-                  playersByPosition.right?.seat ?? null
-                )}
-              />
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.right?.seat ?? null
+              )}
+              avatarUrl={playersByPosition.right?.avatarUrl}
+              stats={playersByPosition.right?.stats}
+            />
 
               {/* PLI */}
               <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
@@ -938,24 +1304,30 @@ function App() {
                 ))}
               </div>
 
-              <SeatBanner
-                position="bottom"
-                player={playersByPosition.bottom}
-                isCurrent={
-                  !!(
-                    gameState &&
-                    playersByPosition.bottom?.seat === gameState.currentPlayer
-                  )
-                }
-                isSelf={true}
-                isTrumpChooser={
-                  playersByPosition.bottom?.seat !== null &&
-                  playersByPosition.bottom?.seat === trumpChooserSeat
-                }
-                cardsCount={remainingCardsForSeat(
-                  playersByPosition.bottom?.seat ?? null
-                )}
-              />
+            <SeatBanner
+              position="bottom"
+              player={playersByPosition.bottom}
+              isCurrent={
+                !!(
+                  gameState &&
+                  playersByPosition.bottom?.seat === gameState.currentPlayer
+                )
+              }
+              isSelf={true}
+              isTrumpChooser={
+                playersByPosition.bottom?.seat !== null &&
+                playersByPosition.bottom?.seat === trumpChooserSeat
+              }
+              cardsCount={remainingCardsForSeat(
+                playersByPosition.bottom?.seat ?? null
+              )}
+              avatarUrl={playersByPosition.bottom?.avatarUrl ?? profile.avatar_url}
+              stats={playersByPosition.bottom?.stats ?? {
+                wins: profile.wins,
+                games: profile.games,
+                winrate: profile.games > 0 ? profile.wins / profile.games : 0,
+              }}
+            />
             </div>
             <div className="pointer-events-none absolute inset-0 z-20">
               {TABLE_POSITIONS.map((position) => {
@@ -1262,6 +1634,9 @@ function App() {
         )}
       </main>
     </div>
+    {profileQuickAccess}
+    {profileModal}
+    </>
   );
 }
 
@@ -1274,9 +1649,19 @@ function SeatBanner(props: {
   isSelf?: boolean;
   cardsCount?: number;
   isTrumpChooser?: boolean;
+  avatarUrl?: string | null;
+  stats?: PlayerStatsPayload;
 }) {
-  const { position, player, isCurrent, isSelf, cardsCount, isTrumpChooser } =
-    props;
+  const {
+    position,
+    player,
+    isCurrent,
+    isSelf,
+    cardsCount,
+    isTrumpChooser,
+    avatarUrl,
+    stats,
+  } = props;
   const col = position === "left" ? 1 : position === "right" ? 3 : 2;
   const row = position === "top" ? 1 : position === "bottom" ? 3 : 2;
 
@@ -1298,6 +1683,14 @@ function SeatBanner(props: {
     ? `${player.nickname} (${seatLabel}, vous)`
     : `${player.nickname} (${seatLabel})`;
 
+  const displayAvatar = avatarUrl ?? player?.avatarUrl ?? null;
+  const statLine =
+    stats && stats.games > 0
+      ? `${Math.round(stats.winrate * 100)}% WR · ${stats.wins}W`
+      : stats
+      ? `${stats.wins}W`
+      : null;
+
   return (
     <div
       className={cx(
@@ -1310,7 +1703,8 @@ function SeatBanner(props: {
       style={{ gridColumn: col, gridRow: row }}
     >
       <div className="flex flex-col items-center gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <AvatarCircle avatarUrl={displayAvatar} fallback={player?.nickname ?? "?"} size="sm" />
           <span
             className={cx(
               "h-1.5 w-1.5 rounded-full",
@@ -1324,6 +1718,11 @@ function SeatBanner(props: {
             </span>
           )}
         </div>
+        {statLine && (
+          <p className="text-[0.55rem] uppercase tracking-[0.4em] text-emerald-100/80">
+            {statLine}
+          </p>
+        )}
         {!isSelf && (cardsCount ?? 0) > 0 && (
           <CardBackFan count={cardsCount ?? 0} />
         )}
@@ -1439,6 +1838,42 @@ function ReactionBubble(props: { position: TablePosition; emoji: string }) {
       <span className="rounded-full border border-emerald-300/70 bg-slate-950/85 px-4 py-2 shadow-[0_18px_35px_-20px_rgba(16,185,129,0.8)] animate-reaction-pop">
         {emoji}
       </span>
+    </div>
+  );
+}
+
+function AvatarCircle(props: {
+  avatarUrl?: string | null;
+  fallback?: string;
+  size?: "sm" | "md";
+}) {
+  const { avatarUrl, fallback, size = "md" } = props;
+  const dimension =
+    size === "sm" ? "h-7 w-7 text-xs" : "h-10 w-10 text-sm";
+  const letter =
+    fallback?.trim().charAt(0).toUpperCase() ?? "👤";
+
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={fallback ?? "Avatar"}
+        className={cx(
+          "rounded-full object-cover ring-1 ring-slate-700/70",
+          dimension
+        )}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={cx(
+        "flex items-center justify-center rounded-full border border-slate-600/60 bg-slate-800/60 text-slate-200",
+        dimension
+      )}
+    >
+      {letter}
     </div>
   );
 }
@@ -1682,6 +2117,317 @@ function CardBackSvg(props: { variant?: "mini" | "stack" | "fan" }) {
         strokeWidth={0.8}
       />
     </svg>
+  );
+}
+
+function ProfileModal(props: {
+  values: { username: string; avatarUrl: string };
+  onChange: (field: "username" | "avatarUrl", value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent) => void;
+  saving: boolean;
+  onUploadAvatar: (file: File) => void;
+  uploadingAvatar: boolean;
+}) {
+  const { values, onChange, onClose, onSubmit, saving, onUploadAvatar, uploadingAvatar } = props;
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      onUploadAvatar(file);
+    }
+    event.target.value = "";
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-3xl border border-slate-600/60 bg-slate-950/95 p-6 text-sm shadow-[0_25px_60px_-30px_rgba(0,0,0,1)]">
+        <h2 className="text-lg font-semibold text-white">Votre profil</h2>
+        <p className="text-xs text-slate-400">
+          Mettez à jour votre pseudo et l&apos;URL de votre avatar.
+        </p>
+        <form onSubmit={onSubmit} className="mt-4 space-y-4">
+          <div className="flex items-center gap-4 rounded-2xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
+            <AvatarCircle avatarUrl={values.avatarUrl} fallback={values.username} />
+            <div className="flex-1 text-xs text-slate-300">
+              <p className="uppercase tracking-[0.35em]">Avatar</p>
+              <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-600/70 px-3 py-1 text-[0.6rem] uppercase tracking-[0.35em] text-slate-200 transition hover:border-slate-400">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  disabled={uploadingAvatar}
+                />
+                {uploadingAvatar ? "Upload en cours..." : "Uploader une image"}
+              </label>
+            </div>
+          </div>
+          <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.35em] text-slate-400">
+            Pseudo
+            <input
+              value={values.username}
+              onChange={(e) => onChange("username", e.target.value)}
+              className="mt-1 rounded-2xl border border-slate-600/60 bg-slate-900/80 px-4 py-2 text-base text-white outline-none transition focus:border-emerald-400"
+              required
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.35em] text-slate-400">
+            Avatar (URL)
+            <input
+              value={values.avatarUrl}
+              onChange={(e) => onChange("avatarUrl", e.target.value)}
+              className="mt-1 rounded-2xl border border-slate-600/60 bg-slate-900/80 px-4 py-2 text-base text-white outline-none transition focus:border-cyan-400"
+              placeholder="https://..."
+            />
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-slate-600 px-4 py-2 text-xs uppercase tracking-[0.35em] text-slate-200"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-white disabled:opacity-50"
+            >
+              {saving ? "Sauvegarde..." : "Sauvegarder"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ProfileSetupScreen(props: {
+  values: { username: string; avatarUrl: string };
+  onChange: (field: "username" | "avatarUrl", value: string) => void;
+  onSubmit: (event: React.FormEvent) => void;
+  saving: boolean;
+  error: string | null;
+  onUploadAvatar: (file: File) => void;
+  uploadingAvatar: boolean;
+}) {
+  const { values, onChange, onSubmit, saving, error, onUploadAvatar, uploadingAvatar } = props;
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      onUploadAvatar(file);
+    }
+    event.target.value = "";
+  };
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-100">
+      <div className="w-full max-w-md rounded-[2rem] border border-slate-700 bg-slate-900/80 p-8 shadow-[0_30px_60px_-35px_rgba(0,0,0,1)]">
+        <h1 className="text-2xl font-semibold text-white">Complétez votre profil</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Choisissez un pseudo public et un avatar (URL).
+        </p>
+        {error && (
+          <p className="mt-4 rounded-xl border border-rose-400/60 bg-rose-500/10 px-4 py-2 text-xs text-rose-100">
+            {error}
+          </p>
+        )}
+        <form onSubmit={onSubmit} className="mt-6 space-y-4">
+          <div className="flex items-center gap-4 rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3">
+            <AvatarCircle avatarUrl={values.avatarUrl} fallback={values.username} />
+            <label className="flex-1 text-xs uppercase tracking-[0.35em] text-slate-400">
+              Avatar
+              <input
+                type="file"
+                accept="image/*"
+                className="mt-2 text-[0.7rem] text-slate-300"
+                onChange={handleFileSelect}
+                disabled={uploadingAvatar}
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-2 text-sm text-slate-200">
+            Pseudo
+            <input
+              value={values.username}
+              onChange={(e) => onChange("username", e.target.value)}
+              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400"
+              required
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-slate-200">
+            Avatar (URL)
+            <input
+              value={values.avatarUrl}
+              onChange={(e) => onChange("avatarUrl", e.target.value)}
+              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white disabled:opacity-50"
+          >
+            {saving ? "Sauvegarde..." : "Enregistrer"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen(props: {
+  mode: "signin" | "signup";
+  onToggleMode: (mode: "signin" | "signup") => void;
+  error: string | null;
+  onError: (value: string | null) => void;
+}) {
+  const { mode, onToggleMode, error, onError } = props;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!supabase) return;
+    setLoading(true);
+    onError(null);
+    setInfo(null);
+
+    if (mode === "signin") {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) {
+        onError(signInError.message);
+      }
+    } else {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { username },
+        },
+      });
+      if (signUpError) {
+        onError(signUpError.message);
+      } else {
+        if (data.user) {
+          await supabase.from("profiles").upsert({
+            id: data.user.id,
+            username: username || email,
+            avatar_url: avatarUrl.trim() || null,
+            wins: 0,
+            games: 0,
+          });
+        }
+        setInfo("Vérifiez vos emails pour confirmer votre compte.");
+      }
+    }
+
+    setLoading(false);
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-12 font-sans text-slate-100">
+      <div className="w-full max-w-lg rounded-[2.5rem] border border-slate-700 bg-slate-900/80 p-10 shadow-[0_35px_70px_-35px_rgba(0,0,0,1)]">
+        <div className="flex justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+              Belote Live
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold text-white">
+              {mode === "signin" ? "Connexion" : "Créer un compte"}
+            </h1>
+          </div>
+          <button
+            type="button"
+            onClick={() => onToggleMode(mode === "signin" ? "signup" : "signin")}
+            className="text-xs uppercase tracking-[0.35em] text-emerald-300"
+          >
+            {mode === "signin" ? "Nouveau ? S'inscrire" : "Déjà inscrit ? Se connecter"}
+          </button>
+        </div>
+        {error && (
+          <p className="mt-4 rounded-xl border border-rose-400/60 bg-rose-900/40 px-4 py-2 text-xs text-rose-100">
+            {error}
+          </p>
+        )}
+        {info && (
+          <p className="mt-4 rounded-xl border border-amber-300/60 bg-amber-900/30 px-4 py-2 text-xs text-amber-200">
+            {info}
+          </p>
+        )}
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <label className="flex flex-col gap-2 text-sm text-slate-200">
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-slate-200">
+            Mot de passe
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-cyan-400"
+            />
+          </label>
+          {mode === "signup" && (
+            <>
+              <label className="flex flex-col gap-2 text-sm text-slate-200">
+                Pseudo
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400"
+                  placeholder="BeloteMaster"
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm text-slate-200">
+                Avatar (URL)
+                <input
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  className="rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3 text-base text-white outline-none transition focus:border-emerald-400"
+                  placeholder="https://..."
+                />
+              </label>
+            </>
+          )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-400 px-4 py-3 text-sm font-semibold uppercase tracking-[0.35em] text-white disabled:opacity-50"
+          >
+            {loading ? "Patientez..." : mode === "signin" ? "Se connecter" : "Créer un compte"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function FullScreenLoader(props: { message: string }) {
+  const { message } = props;
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">
+      <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-700 bg-slate-900/80 px-8 py-6 text-sm shadow-[0_25px_50px_-28px_rgba(0,0,0,1)]">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+        <p>{message}</p>
+      </div>
+    </div>
   );
 }
 

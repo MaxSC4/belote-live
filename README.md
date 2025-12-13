@@ -53,6 +53,8 @@ belote-live/
 | ------------------- | ---------- | -------------------- | --------------------------------------------- |
 | `PORT`              | Backend    | `3000`               | HTTP/WebSocket server port                    |
 | `VITE_BACKEND_URL`  | Frontend   | `http://localhost:3000` | Overrides backend base URL for the client  |
+| `SUPABASE_URL` & `SUPABASE_SERVICE_ROLE_KEY` | Backend | — | Credentials used to verify tokens & update stats |
+| `VITE_SUPABASE_URL` & `VITE_SUPABASE_ANON_KEY` | Frontend | — | Supabase project + anon key for auth UI |
 
 On boot, the frontend derives `ws://…/ws` automatically from `VITE_BACKEND_URL`.
 

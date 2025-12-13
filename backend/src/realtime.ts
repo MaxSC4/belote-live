@@ -13,6 +13,7 @@ import {
 } from "./game/gameState";
 
 import { Card, PlayerId } from "./game/types";
+import { supabaseAdmin, hasSupabaseConfig } from "./supabase";
 
 type ClientId = string;
 
@@ -22,6 +23,12 @@ interface ClientInfo {
     nickname: string;
     roomCode?: string;
     seat?: PlayerId; // 0..3
+    userId?: string;
+    avatarUrl?: string | null;
+    profileStats?: {
+        wins: number;
+        games: number;
+    };
 }
 
 interface Room {
@@ -46,6 +53,14 @@ interface PlayerReactionState {
     expiresAt: number;
 }
 
+interface ProfileRecord {
+    id: string;
+    username: string;
+    avatar_url: string | null;
+    wins: number;
+    games: number;
+}
+
 const REACTION_DURATION_MS = 5000;
 
 const clients = new Map<ClientId, ClientInfo>();
@@ -66,7 +81,8 @@ interface JoinRoomMessage extends BaseMessage {
     type: "join_room";
     payload: {
         roomCode: string;
-        nickname: string;
+        nickname?: string;
+        accessToken: string;
     };
 }
 
@@ -85,7 +101,18 @@ interface RoomUpdateMessage extends BaseMessage {
     type: "room_update";
     payload: {
         roomCode: string;
-        players: { id: ClientId; nickname: string; seat: PlayerId | null }[];
+        players: {
+            id: ClientId;
+            nickname: string;
+            seat: PlayerId | null;
+            userId?: string | null;
+            avatarUrl?: string | null;
+            stats?: {
+                wins: number;
+                games: number;
+                winrate: number;
+            };
+        }[];
     };
 }
 
@@ -134,7 +161,15 @@ type IncomingMessage =
     | PlayCardMessage
     | ChooseTrumpMessage
     | AnnounceBeloteMessage
-    | PlayerReactionMessage;
+    | PlayerReactionMessage
+    | SyncProfileMessage;
+
+interface SyncProfileMessage extends BaseMessage {
+    type: "sync_profile";
+    payload: {
+        accessToken: string;
+    };
+}
 
 // --------- Utils envoi ---------
 
@@ -153,6 +188,18 @@ function broadcastRoomUpdate(roomCode: string) {
         id: c.id,
         nickname: c.nickname,
         seat: c.seat ?? null,
+        userId: c.userId ?? null,
+        avatarUrl: c.avatarUrl ?? null,
+        stats: c.profileStats
+            ? {
+                wins: c.profileStats.wins,
+                games: c.profileStats.games,
+                winrate:
+                    c.profileStats.games > 0
+                        ? c.profileStats.wins / c.profileStats.games
+                        : 0,
+            }
+            : undefined,
         }));
 
     const payload: RoomUpdateMessage = {
@@ -236,14 +283,53 @@ function clearReactionForSeat(room: Room, seat: PlayerId, shouldBroadcast = true
 
 // --------- Handlers ---------
 
-function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
+async function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
     const roomCode = message.payload.roomCode.trim().toUpperCase();
-    const nickname = message.payload.nickname.trim();
+    const accessToken = message.payload.accessToken?.trim();
 
-    if (!roomCode || !nickname) {
+    if (!roomCode || !accessToken) {
         const error: ErrorMessage = {
-        type: "error",
-        payload: { message: "roomCode et nickname sont obligatoires." },
+            type: "error",
+            payload: { message: "roomCode et accessToken sont obligatoires." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (!supabaseAdmin || !hasSupabaseConfig) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Supabase n'est pas configuré côté serveur." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    let supabaseUser;
+    try {
+        supabaseUser = await requireSupabaseUser(accessToken);
+    } catch (err: any) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: err?.message ?? "Token Supabase invalide." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const usernameFallback =
+        message.payload.nickname?.trim() ||
+        supabaseUser.user_metadata?.username ||
+        supabaseUser.email ||
+        `Joueur-${supabaseUser.id.slice(0, 4)}`;
+
+    let profile: ProfileRecord;
+    try {
+        profile = await fetchOrCreateProfile(supabaseUser.id, usernameFallback);
+    } catch (err: any) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: err?.message ?? "Profil Supabase indisponible." },
         };
         send(client.ws, error);
         return;
@@ -294,7 +380,13 @@ function handleJoinRoomMessage(client: ClientInfo, message: JoinRoomMessage) {
         }
     }
 
-    client.nickname = nickname;
+    client.nickname = profile.username;
+    client.avatarUrl = profile.avatar_url ?? null;
+    client.userId = profile.id;
+    client.profileStats = {
+        wins: profile.wins ?? 0,
+        games: profile.games ?? 0,
+    };
     client.roomCode = roomCode;
 
     // Assigner un siège s'il n'en a pas déjà
@@ -376,7 +468,7 @@ function handleStartGameMessage(client: ClientInfo) {
 
 
 
-function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
+async function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
     if (!client.roomCode) {
         const error: ErrorMessage = {
         type: "error",
@@ -442,13 +534,23 @@ function handlePlayCardMessage(client: ClientInfo, message: PlayCardMessage) {
             const ms = room.matchScores;
             ms.team0 += state.scores.team0;
             ms.team1 += state.scores.team1;
+
+            let winningTeam: 0 | 1 | null = null;
+            if (state.scores.team0 !== state.scores.team1) {
+                winningTeam = state.scores.team0 > state.scores.team1 ? 0 : 1;
+            }
+            try {
+                await updatePlayerStats(room, winningTeam);
+            } catch (err) {
+                console.error("Impossible de mettre à jour les stats Supabase", err);
+            }
         }
 
         broadcastGameState(room);
     } catch (e: any) {
         const error: ErrorMessage = {
-        type: "error",
-        payload: { message: e?.message ?? "Erreur lors du jeu de la carte." },
+            type: "error",
+            payload: { message: e?.message ?? "Erreur lors du jeu de la carte." },
         };
         send(client.ws, error);
     }
@@ -532,6 +634,60 @@ function handleAnnounceBeloteMessage(client: ClientInfo){
     broadcastGameState(room);
 }
 
+async function handleSyncProfileMessage(client: ClientInfo, message: SyncProfileMessage) {
+    if (!client.roomCode || !client.userId) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Vous n'êtes pas dans une room." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    if (!supabaseAdmin || !hasSupabaseConfig) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Supabase indisponible." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    const token = message.payload.accessToken?.trim();
+    if (!token) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: "Token requis pour synchroniser le profil." },
+        };
+        send(client.ws, error);
+        return;
+    }
+
+    try {
+        const supabaseUser = await requireSupabaseUser(token);
+        if (supabaseUser.id !== client.userId) {
+            throw new Error("Token ne correspondant pas à l'utilisateur courant.");
+        }
+        const profile = await fetchOrCreateProfile(
+            supabaseUser.id,
+            supabaseUser.user_metadata?.username || supabaseUser.email || client.nickname
+        );
+        client.nickname = profile.username;
+        client.avatarUrl = profile.avatar_url ?? null;
+        client.profileStats = {
+            wins: profile.wins ?? 0,
+            games: profile.games ?? 0,
+        };
+        broadcastRoomUpdate(client.roomCode);
+    } catch (err: any) {
+        const error: ErrorMessage = {
+            type: "error",
+            payload: { message: err?.message ?? "Impossible de synchroniser le profil." },
+        };
+        send(client.ws, error);
+    }
+}
+
 function handlePlayerReactionMessage(client: ClientInfo, message: PlayerReactionMessage) {
     if (!client.roomCode) {
         const error: ErrorMessage = {
@@ -579,6 +735,56 @@ function handlePlayerReactionMessage(client: ClientInfo, message: PlayerReaction
     broadcastGameState(room);
 }
 
+async function requireSupabaseUser(accessToken: string) {
+    if (!supabaseAdmin) {
+        throw new Error("Supabase non configuré.");
+    }
+    const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+    if (error || !data?.user) {
+        throw new Error("Token Supabase invalide.");
+    }
+    return data.user;
+}
+
+async function fetchOrCreateProfile(userId: string, usernameFallback: string): Promise<ProfileRecord> {
+    if (!supabaseAdmin) {
+        throw new Error("Supabase non configuré.");
+    }
+    const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("id, username, avatar_url, wins, games")
+        .eq("id", userId)
+        .maybeSingle();
+
+    if (error && error.code !== "PGRST116") {
+        throw new Error("Impossible de récupérer le profil Supabase.");
+    }
+
+    if (data) {
+        return {
+            id: data.id,
+            username: data.username ?? usernameFallback,
+            avatar_url: data.avatar_url ?? null,
+            wins: data.wins ?? 0,
+            games: data.games ?? 0,
+        };
+    }
+
+    const profile: ProfileRecord = {
+        id: userId,
+        username: usernameFallback,
+        avatar_url: null,
+        wins: 0,
+        games: 0,
+    };
+
+    const { error: insertError } = await supabaseAdmin.from("profiles").insert(profile);
+    if (insertError) {
+        throw new Error("Impossible de créer le profil Supabase.");
+    }
+
+    return profile;
+}
 
 function handleClientDisconnect(clientId: ClientId) {
     const client = clients.get(clientId);
@@ -608,6 +814,34 @@ function handleClientDisconnect(clientId: ClientId) {
     clients.delete(clientId);
 }
 
+async function updatePlayerStats(room: Room, winningTeam: 0 | 1 | null) {
+    if (!supabaseAdmin || !hasSupabaseConfig) return;
+    for (let seatIndex = 0; seatIndex < room.seats.length; seatIndex += 1) {
+        const clientId = room.seats[seatIndex];
+        if (!clientId) continue;
+        const client = clients.get(clientId);
+        if (!client || !client.userId) continue;
+        if (!client.profileStats) {
+            client.profileStats = { wins: 0, games: 0 };
+        }
+        client.profileStats.games += 1;
+        const seatTeam: 0 | 1 = seatIndex % 2 === 0 ? 0 : 1;
+        if (winningTeam !== null && seatTeam === winningTeam) {
+            client.profileStats.wins += 1;
+        }
+
+        await supabaseAdmin
+            .from("profiles")
+            .update({
+                wins: client.profileStats.wins,
+                games: client.profileStats.games,
+            })
+            .eq("id", client.userId);
+    }
+
+    broadcastRoomUpdate(room.code);
+}
+
 // --------- Setup WebSocket ---------
 
 export function setupWebSocketServer(httpServer: Server) {
@@ -626,7 +860,7 @@ export function setupWebSocketServer(httpServer: Server) {
 
         clients.set(clientId, client);
 
-        ws.on("message", (data: Buffer) => {
+        ws.on("message", async (data: Buffer) => {
         let parsed: IncomingMessage;
         try {
             parsed = JSON.parse(data.toString());
@@ -641,13 +875,13 @@ export function setupWebSocketServer(httpServer: Server) {
 
         switch (parsed.type) {
             case "join_room":
-                handleJoinRoomMessage(client, parsed);
+                await handleJoinRoomMessage(client, parsed);
                 break;
             case "start_game":
                 handleStartGameMessage(client);
                 break;
             case "play_card":
-                handlePlayCardMessage(client, parsed);
+                await handlePlayCardMessage(client, parsed);
                 break;
             case "choose_trump":
                 handleChooseTrumpMessage(client, parsed);
@@ -657,6 +891,9 @@ export function setupWebSocketServer(httpServer: Server) {
                 break;
             case "player_reaction":
                 handlePlayerReactionMessage(client, parsed);
+                break;
+            case "sync_profile":
+                await handleSyncProfileMessage(client, parsed);
                 break;
             default: {
                 const msg: ErrorMessage = {
