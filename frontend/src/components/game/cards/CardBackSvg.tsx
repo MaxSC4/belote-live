@@ -1,78 +1,67 @@
+import { useId } from "react";
+
 interface CardBackSvgProps {
   variant?: "mini" | "stack" | "fan";
 }
 
-export default function CardBackSvg(props: CardBackSvgProps) {
-  const { variant = "mini" } = props;
+const VIEWBOX_WIDTH = 169.075;
+const VIEWBOX_HEIGHT = 244.64;
+
+export default function CardBackSvg({ variant = "mini" }: CardBackSvgProps) {
   const sizeMap = {
     mini: { width: 34, height: 50 },
     stack: { width: 52, height: 72 },
     fan: { width: 48, height: 68 },
   } as const;
   const { width, height } = sizeMap[variant];
+  const svgId = useId();
+  const gradientId = `${svgId}-felt`;
+  const overlayId = `${svgId}-overlay`;
+
+  const backHref = `${import.meta.env.BASE_URL}belote-cards.svg#back`;
 
   return (
     <svg
-      viewBox="0 0 52 72"
+      viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
       width={width}
       height={height}
-      className="block drop-shadow-[0_6px_10px_rgba(0,0,0,0.7)]"
+      className="block drop-shadow-[0_12px_22px_rgba(2,6,23,0.65)]"
+      role="img"
+      aria-label="Dos de carte Belote Live"
     >
       <defs>
-        <linearGradient id="card-back" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#111827" />
-          <stop offset="100%" stopColor="#0f172a" />
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#042f2e" />
+          <stop offset="100%" stopColor="#064e3b" />
         </linearGradient>
-        <pattern
-          id="card-weave"
-          width="6"
-          height="6"
-          patternUnits="userSpaceOnUse"
-        >
-          <path d="M0 6 L6 0" stroke="#1f2937" strokeWidth="0.8" />
-          <path d="M-1 1 L1 -1" stroke="#111827" strokeWidth="0.7" />
-        </pattern>
-        <linearGradient id="card-accent" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="100%" stopColor="#059669" />
+        <linearGradient id={overlayId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(16,185,129,0.35)" />
+          <stop offset="100%" stopColor="rgba(16,185,129,0.05)" />
         </linearGradient>
       </defs>
       <rect
-        x={1}
-        y={1}
-        width={50}
-        height={70}
-        rx={7}
-        ry={7}
-        fill="url(#card-back)"
-        stroke="#10b981"
-        strokeWidth={0.8}
+        width={VIEWBOX_WIDTH}
+        height={VIEWBOX_HEIGHT}
+        rx={26}
+        ry={26}
+        fill={`url(#${gradientId})`}
+      />
+      <use
+        href={backHref}
+        xlinkHref={backHref}
+        width={VIEWBOX_WIDTH}
+        height={VIEWBOX_HEIGHT}
+        style={{ fill: "rgba(8,145,178,0.4)" }}
       />
       <rect
-        x={4}
-        y={4}
-        width={44}
-        height={64}
-        rx={5}
-        ry={5}
-        fill="url(#card-weave)"
-        stroke="#1f2937"
-        strokeWidth={0.4}
+        width={VIEWBOX_WIDTH - 18}
+        height={VIEWBOX_HEIGHT - 18}
+        x={9}
+        y={9}
+        rx={22}
+        ry={22}
+        fill={`url(#${overlayId})`}
       />
-      <path
-        d="M10 18 L42 18 L35 54 H17 Z"
-        fill="rgba(5,150,105,0.08)"
-        stroke="rgba(52,211,153,0.3)"
-        strokeWidth={0.6}
-      />
-      <circle cx={26} cy={36} r={13} fill="rgba(15,23,42,0.75)" stroke="rgba(16,185,129,0.4)" strokeWidth={0.6} />
-      <path
-        d="M26 28 L32 36 L26 44 L20 36 Z"
-        fill="url(#card-accent)"
-        stroke="#064e3b"
-        strokeWidth={0.5}
-      />
-      <circle cx={26} cy={36} r={3} fill="#0f172a" stroke="#34d399" strokeWidth={0.5} />
     </svg>
   );
 }

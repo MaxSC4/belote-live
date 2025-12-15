@@ -1,7 +1,9 @@
 declare module "animejs" {
-    interface AnimeParams {
-        targets?: any;
-        [key: string]: any;
+    type AnimeTarget = string | Element | Element[] | NodeListOf<Element>;
+    type AnimeProperties = Record<string, unknown>;
+
+    interface AnimeParams extends AnimeProperties {
+        targets?: AnimeTarget | AnimeTarget[];
     }
 
     interface AnimeInstance {
@@ -15,13 +17,13 @@ declare module "animejs" {
 
     interface AnimeStatic {
         (params: AnimeParams): AnimeInstance;
-        timeline(params?: AnimeParams): any;
-        remove(targets: any): void;
-        set(targets: any, properties: any): void;
-        stagger(value: number | number[], options?: any): any;
+        timeline(params?: AnimeParams): AnimeInstance;
+        remove(targets: AnimeTarget | AnimeTarget[]): void;
+        set(targets: AnimeTarget | AnimeTarget[], properties: AnimeProperties): void;
+        stagger(value: number | number[], options?: AnimeProperties): (el: Element, index: number, total: number) => number;
         random(min: number, max: number): number;
     }
 
     const anime: AnimeStatic;
     export default anime;
-    }
+}

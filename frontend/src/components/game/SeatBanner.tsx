@@ -2,6 +2,7 @@ import AvatarCircle from "../common/AvatarCircle";
 import type { TablePosition } from "../../types/table";
 import type { PlayerStatsPayload, RoomPlayer } from "../../types/players";
 import { cx } from "../../utils/cx";
+import { Crown } from "lucide-react";
 
 interface SeatBannerProps {
   position: TablePosition;
@@ -72,7 +73,8 @@ export default function SeatBanner(props: SeatBannerProps) {
       </div>
       {isTrumpChooser && (
         <span className="inline-flex items-center gap-1 text-[0.55rem] font-semibold uppercase tracking-[0.35em] text-amber-100">
-          <span className="text-xs">👑</span> Preneur
+          <Crown className="h-3.5 w-3.5 text-amber-200" strokeWidth={2} />
+          Preneur
         </span>
       )}
     </div>
