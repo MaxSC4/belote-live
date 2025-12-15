@@ -126,6 +126,10 @@ CI is not wired yet; run the commands locally before pushing.
 
 Any idea—from new scoring panels to persistent player rankings—is welcome. Open an issue to start a discussion!
 
+## 🙏 Credits
+
+Playing-card SVGs are based on the excellent [svg-cards](https://github.com/htdebeer/SVG-cards) project—huge thanks to the authors for open-sourcing their deck.
+
 ---
 
 Made with ♥️ and a lot of belote nostalgia. Shuffle up and deal! 🃏
