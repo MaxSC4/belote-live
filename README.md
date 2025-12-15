@@ -126,6 +126,16 @@ CI is not wired yet; run the commands locally before pushing.
 
 Any idea—from new scoring panels to persistent player rankings—is welcome. Open an issue to start a discussion!
 
+## 🗺️ Roadmap (WIP)
+
+| Feature                               | Status      | Notes                                                             |
+| ------------------------------------- | ----------- | ----------------------------------------------------------------- |
+| **Mode “Contrée”**                    | ⏳ Planned  | Add bidding logic + UI for Contra/Re-contra flows.                |
+| **Better table management**           | ⏳ Planned  | Improve seat persistence, host hand-off, and multi-table admin.   |
+| **Sound design (deal/play feedback)** | ⏳ Planned  | Short SFX for card play, trick completion, belote/rebelote cues.  |
+
+Have another suggestion? Drop it in the issues or open a PR referencing this roadmap.
+
 ## 🙏 Credits
 
 Playing-card SVGs are based on the excellent [svg-cards](https://github.com/htdebeer/SVG-cards) project—huge thanks to the authors for open-sourcing their deck.
