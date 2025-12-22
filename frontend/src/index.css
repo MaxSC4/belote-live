@@ -53,10 +53,10 @@ body {
 
   .bg-felt {
     background-image: radial-gradient(
-      circle at 20% 0,
-      #047857 0,
-      #065f46 40%,
-      #052e16 80%
+      circle at 30% 20%,
+      #0ea76b 0,
+      #0b7b52 45%,
+      #05321b 85%
     );
   }
 

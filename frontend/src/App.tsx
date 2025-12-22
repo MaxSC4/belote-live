@@ -12,7 +12,18 @@ import ReactionBubble from "./components/game/ReactionBubble";
 import SeatBanner from "./components/game/SeatBanner";
 import TrickCardView from "./components/game/TrickCardView";
 import TrickWinnerSpotlight from "./components/game/TrickWinnerSpotlight";
-import { Crown, RefreshCw, Shuffle, Smile, Trophy } from "lucide-react";
+import {
+  Crown,
+  DoorOpen,
+  LogOut,
+  PanelRightClose,
+  PanelRightOpen,
+  PlayCircle,
+  RefreshCw,
+  Shuffle,
+  Smile,
+  Trophy,
+} from "lucide-react";
 import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
 import CardSvg from "./components/game/cards/CardSvg";
 import ProfileModal from "./components/profile/ProfileModal";
@@ -27,6 +38,12 @@ import { sortHandBySuitColor } from "./utils/cards";
 type View = "lobby" | "game";
 
 type ProfileFormState = { username: string; avatarUrl?: string | null };
+
+type Toast = {
+  id: number;
+  message: string;
+  tone: "error" | "info";
+};
 
 type RoomUpdateMessage = {
   type: "room_update";
@@ -155,8 +172,8 @@ function App() {
   const [isSorting, setIsSorting] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isLandscape, setIsLandscape] = useState(true);
-  const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -175,8 +192,20 @@ function App() {
   const profileAvatarUrl = profile?.avatar_url ?? null;
   const hasProfile = Boolean(profile);
   const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(PLACEHOLDER_HALL_OF_FAME);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   const supabaseReady = Boolean(supabase);
+
+  const addToast = useCallback(
+    (message: string, tone: "error" | "info" = "error") => {
+      const id = Date.now() + Math.random();
+      setToasts((prev) => [...prev, { id, message, tone }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, 3200);
+    },
+    []
+  );
 
   useEffect(() => {
     if (!supabase) {
@@ -203,6 +232,12 @@ function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (wsError) {
+      addToast(wsError, "error");
+    }
+  }, [wsError, addToast]);
 
   // ---- LOBBY ----
 
@@ -237,7 +272,7 @@ function App() {
       setDisplayHand([]);
       prevHandRef.current = [];
       setShowReactionPicker(false);
-      setShowMobilePanel(false);
+      setSidebarOpen(false);
       return;
     }
 
@@ -958,12 +993,6 @@ function App() {
           )}
         </div>
       )}
-
-      {wsError && (
-        <div className="rounded-lg border border-rose-400/70 bg-rose-900/50 px-3 py-2 text-xs text-rose-100">
-          {wsError}
-        </div>
-      )}
     </div>
   );
 
@@ -1007,10 +1036,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isMobile) {
-      setShowMobilePanel(false);
-    }
+    setSidebarOpen(!isMobile);
   }, [isMobile]);
+
+  useEffect(() => {
+    if (view === "game") {
+      setSidebarOpen(!isMobile);
+    }
+  }, [view, isMobile]);
 
   // ---- Animation de distribution de la main ----
 
@@ -1443,7 +1476,7 @@ function App() {
 
   return (
     <>
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-game px-3 pb-3 pt-4 font-sans text-slate-100 lg:h-screen">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.18),transparent_40%),radial-gradient(circle_at_80%_0%,rgba(129,140,248,0.14),transparent_45%),linear-gradient(135deg,#020617_0%,#0b162b_50%,#050915_100%)] px-4 pb-4 pt-4 font-sans text-slate-100 lg:h-screen">
       <div
         className="pointer-events-none absolute left-6 top-6 hidden rotate-[-10deg] opacity-60 xl:block"
         style={{ filter: "drop-shadow(0 30px 50px rgba(6,182,212,0.3))" }}
@@ -1493,7 +1526,7 @@ function App() {
         </div>
 
         <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2">
+          <div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 shadow-[0_15px_35px_-25px_rgba(0,0,0,0.8)]">
             <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
             <div className="text-right">
               <p className="text-sm font-semibold text-white">{profile.username}</p>
@@ -1521,28 +1554,31 @@ function App() {
               onClick={handleStartGame}
               disabled={wsStatus !== "connected"}
               className={cx(
-                "rounded-full px-4 py-2 text-sm font-medium text-white transition",
+                "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white transition",
                 wsStatus === "connected"
-                  ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 hover:from-emerald-400 hover:to-emerald-400"
+                  ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 shadow-[0_15px_30px_-18px_rgba(16,185,129,0.8)] hover:from-emerald-400 hover:to-emerald-400"
                   : "cursor-not-allowed bg-slate-600/70"
               )}
             >
+              <PlayCircle className="h-4 w-4" />
               Lancer la partie
             </button>
 
             <button
               type="button"
               onClick={() => setView("lobby")}
-              className="rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
             >
+              <DoorOpen className="h-4 w-4" />
               Quitter la table
             </button>
 
             <button
               type="button"
               onClick={handleSignOut}
-              className="rounded-full border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-100 transition hover:border-rose-300"
+              className="inline-flex items-center gap-2 rounded-full border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-100 transition hover:border-rose-300"
             >
+              <LogOut className="h-4 w-4" />
               Déconnexion
             </button>
           </div>
@@ -1550,9 +1586,9 @@ function App() {
       </header>
 
       {/* ZONE PRINCIPALE */}
-      <main className="relative mt-2 flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+      <main className="relative mt-4 flex flex-1 justify-center">
         {/* TAPIS */}
-        <section className="relative flex h-full w-full flex-1 flex-col rounded-[1.25rem] border border-slate-500/40 bg-felt px-3 pb-16 pt-2 shadow-table lg:pb-3">
+        <section className="relative mx-auto flex h-[85vh] w-[92vw] max-w-6xl flex-col rounded-[1.5rem] border border-emerald-200/15 bg-felt px-4 pb-16 pt-4 shadow-[0_25px_60px_-30px_rgba(0,0,0,0.85)] backdrop-blur">
           {gameState && (
             <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-300/40 bg-slate-950/85 px-4 py-2 text-xs uppercase tracking-[0.35em] text-slate-200 shadow-[0_18px_35px_-20px_rgba(0,0,0,0.8)]">
               <div className="flex flex-col">
@@ -1955,78 +1991,85 @@ function App() {
             </div>
           </div>
         </section>
-
-        {/* SIDEBAR */}
-        <aside className="hidden max-w-[320px] shrink-0 rounded-xl border border-slate-500/40 bg-slate-950/95 p-3 text-sm shadow-panel lg:block lg:w-[260px]">
+        <aside
+          className={cx(
+            "fixed right-4 top-[110px] z-40 w-[340px] max-w-[90vw] overflow-y-auto rounded-2xl border border-white/12 bg-slate-950/90 p-4 text-sm shadow-[0_25px_60px_-32px_rgba(0,0,0,0.9)] backdrop-blur transition-all duration-300",
+            sidebarOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-[110%] opacity-0"
+          )}
+        >
           {sidebarContent}
         </aside>
-
-        {/* OVERLAY SCORE FINAL */}
-        {showEndOverlay && gameState && (
+        {sidebarOpen && (
           <div
-            className="absolute inset-0 z-50 flex items-center justify-center"
-            onClick={() => setShowEndOverlay(false)}
-          >
-            <div className="absolute inset-0 bg-slate-950/85 animate-backdrop-fade" />
-            <div className="relative max-w-sm rounded-2xl border border-slate-500/70 bg-gradient-to-b from-slate-900 to-slate-950 px-8 py-6 text-center text-sm shadow-[0_25px_60px_-24px_rgba(0,0,0,1)] animate-final-score-pop">
-              <h2 className="text-lg font-semibold text-white">🎉 Donne terminée</h2>
-              <p className="mt-2 text-slate-200">
-                Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :
-                <strong className="ml-1 text-white">{gameState.scores.team0}</strong> pts
-              </p>
-              <p className="mt-1 text-slate-200">
-                Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :
-                <strong className="ml-1 text-white">{gameState.scores.team1}</strong> pts
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowEndOverlay(false)}
-                className="mt-4 rounded-full border border-slate-500/70 px-5 py-2 text-sm text-slate-100"
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        )}
-        {isMobile && (
-          <button
-            type="button"
-            onClick={() => setShowMobilePanel(true)}
-            className="fixed bottom-4 right-4 z-30 flex items-center gap-2 rounded-full border border-emerald-300/60 bg-slate-950/90 px-4 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.4em] text-emerald-100 shadow-[0_25px_55px_-30px_rgba(16,185,129,1)] backdrop-blur"
-          >
-            <span>👥</span>
-            <span>Scores</span>
-          </button>
-        )}
-
-        {isMobile && showMobilePanel && (
-          <div className="fixed inset-0 z-40">
-            <div
-              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
-              onClick={() => setShowMobilePanel(false)}
-            />
-            <div className="relative mt-auto max-h-[80vh] rounded-t-3xl border border-slate-500/60 bg-slate-950/95 p-5 text-sm shadow-[0_-25px_60px_-30px_rgba(0,0,0,0.9)]">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
-                  Joueurs &amp; scores
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowMobilePanel(false)}
-                  className="rounded-full border border-slate-600/70 px-3 py-1 text-xs text-slate-300"
-                >
-                  Fermer
-                </button>
-              </div>
-              <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-                {sidebarContent}
-              </div>
-            </div>
-          </div>
+            className="fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-sm lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
         )}
       </main>
+
+      <button
+        type="button"
+        onClick={() => setSidebarOpen((prev) => !prev)}
+        className={cx(
+          "fixed bottom-4 right-4 z-50 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold uppercase tracking-[0.25em] shadow-[0_20px_40px_-24px_rgba(6,182,212,0.9)] transition backdrop-blur",
+          sidebarOpen
+            ? "border-cyan-300/70 bg-cyan-500/20 text-cyan-50"
+            : "border-slate-600/80 bg-slate-900/85 text-slate-100 hover:border-cyan-200"
+        )}
+        aria-pressed={sidebarOpen}
+        aria-label="Basculer la sidebar scores et joueurs"
+      >
+        {sidebarOpen ? (
+          <PanelRightClose className="h-4 w-4" />
+        ) : (
+          <PanelRightOpen className="h-4 w-4" />
+        )}
+        Scores
+      </button>
+
+      {showEndOverlay && gameState && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setShowEndOverlay(false)}
+        >
+          <div className="absolute inset-0 bg-slate-950/85 animate-backdrop-fade" />
+          <div className="relative max-w-sm rounded-2xl border border-slate-500/70 bg-gradient-to-b from-slate-900 to-slate-950 px-8 py-6 text-center text-sm shadow-[0_25px_60px_-24px_rgba(0,0,0,1)] animate-final-score-pop">
+            <h2 className="text-lg font-semibold text-white">🎉 Donne terminée</h2>
+            <p className="mt-2 text-slate-200">
+              Équipe ({shortSeatLabel(0)} &amp; {shortSeatLabel(2)}) :
+              <strong className="ml-1 text-white">{gameState.scores.team0}</strong> pts
+            </p>
+            <p className="mt-1 text-slate-200">
+              Équipe ({shortSeatLabel(1)} &amp; {shortSeatLabel(3)}) :
+              <strong className="ml-1 text-white">{gameState.scores.team1}</strong> pts
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowEndOverlay(false)}
+              className="mt-4 rounded-full border border-slate-500/70 px-5 py-2 text-sm text-slate-100"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="pointer-events-none fixed left-1/2 top-4 z-50 flex -translate-x-1/2 flex-col gap-3">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={cx(
+              "pointer-events-auto flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-[0_18px_35px_-20px_rgba(0,0,0,0.8)]",
+              toast.tone === "error"
+                ? "border-rose-300/60 bg-rose-500/15 text-rose-50"
+                : "border-emerald-300/60 bg-emerald-500/15 text-emerald-50"
+            )}
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </div>
-    {profileQuickAccess}
     {profileModal}
     </>
   );
