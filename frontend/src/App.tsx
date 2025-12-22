@@ -26,6 +26,8 @@ import { sortHandBySuitColor } from "./utils/cards";
 
 type View = "lobby" | "game";
 
+type ProfileFormState = { username: string; avatarUrl?: string | null };
+
 type RoomUpdateMessage = {
   type: "room_update";
   payload: {
@@ -161,7 +163,7 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileForm, setProfileForm] = useState({ username: "" });
+  const [profileForm, setProfileForm] = useState<ProfileFormState>({ username: "", avatarUrl: null });
   const [profileSaving, setProfileSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -339,7 +341,7 @@ function App() {
   const handleSignOut = async () => {
     if (profile?.isGuest) {
       setProfile(null);
-      setProfileForm({ username: "" });
+      setProfileForm({ username: "", avatarUrl: null });
       setNickname("");
       setRoomCode("");
       setView("lobby");
@@ -352,8 +354,13 @@ function App() {
     setView("lobby");
   };
 
-  const handleProfileFieldChange = (field: "username", value: string) => {
+  const handleProfileFieldChange = (field: "username" | "avatarUrl", value: string | null) => {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSelectPresetAvatar = (avatarUrl: string) => {
+    setProfileForm((prev) => ({ ...prev, avatarUrl }));
+    setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
   };
 
   const handleContinueAsGuest = () => {
@@ -372,6 +379,7 @@ function App() {
     setProfile(guestProfile);
     setProfileForm({
       username: guestName,
+      avatarUrl: DEFAULT_GUEST_AVATAR,
     });
     setNickname(guestName);
     setView("lobby");
@@ -388,9 +396,11 @@ function App() {
           ? {
               ...prev,
               username,
+              avatar_url: profileForm.avatarUrl ?? prev.avatar_url ?? null,
             }
           : prev
       );
+      setProfileForm((prev) => ({ ...prev, avatarUrl: profileForm.avatarUrl ?? prev.avatarUrl ?? null }));
       setNickname(username);
       setShowProfileModal(false);
       setAuthError(null);
@@ -403,7 +413,7 @@ function App() {
       .upsert({
         id: session.user.id,
         username,
-        avatar_url: profile?.avatar_url ?? null,
+        avatar_url: profileForm.avatarUrl ?? profile?.avatar_url ?? null,
       });
     setProfileSaving(false);
     if (error) {
@@ -413,7 +423,7 @@ function App() {
     const updated: UserProfile = {
       id: session.user.id,
       username,
-      avatar_url: profile?.avatar_url ?? null,
+      avatar_url: profileForm.avatarUrl ?? profile?.avatar_url ?? null,
       wins: profile?.wins ?? 0,
       games: profile?.games ?? 0,
       isGuest: false,
@@ -481,6 +491,7 @@ function App() {
         throw updateError;
       }
       setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+      setProfileForm((prev) => ({ ...prev, avatarUrl: publicUrl }));
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
@@ -1061,7 +1072,7 @@ function App() {
     if (!session) {
       if (!isGuestProfile) {
         setProfile(null);
-        setProfileForm({ username: "" });
+        setProfileForm({ username: "", avatarUrl: null });
         setNickname("");
       }
       setProfileLoading(false);
@@ -1099,6 +1110,7 @@ function App() {
           setProfile(normalized);
           setProfileForm({
             username: normalized.username,
+            avatarUrl: normalized.avatar_url ?? null,
           });
           setNickname(normalized.username);
           setAuthError(null);
@@ -1233,6 +1245,7 @@ function App() {
       <ProfileSetupScreen
         values={profileForm}
         onChange={handleProfileFieldChange}
+        onSelectAvatar={handleSelectPresetAvatar}
         onSubmit={handleSaveProfile}
         saving={profileSaving}
         error={authError}
@@ -1265,8 +1278,12 @@ function App() {
     editableProfile &&
     showProfileModal && (
       <ProfileModal
-        values={profileForm}
+        values={{
+          ...profileForm,
+          avatarUrl: profileForm.avatarUrl ?? editableProfile.avatar_url ?? null,
+        }}
         onChange={handleProfileFieldChange}
+        onSelectAvatar={handleSelectPresetAvatar}
         onClose={() => setShowProfileModal(false)}
         onSubmit={handleSaveProfile}
         saving={profileSaving}

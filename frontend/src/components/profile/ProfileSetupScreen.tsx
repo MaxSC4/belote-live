@@ -1,8 +1,10 @@
+import { AvatarPicker } from "@/components/ui/avatar-picker";
 import AvatarCircle from "../common/AvatarCircle";
 
 interface ProfileSetupScreenProps {
-  values: { username: string };
-  onChange: (field: "username", value: string) => void;
+  values: { username: string; avatarUrl?: string | null };
+  onChange: (field: "username" | "avatarUrl", value: string | null) => void;
+  onSelectAvatar: (avatarUrl: string) => void;
   onSubmit: (event: React.FormEvent) => void;
   saving: boolean;
   error: string | null;
@@ -14,6 +16,7 @@ export default function ProfileSetupScreen(props: ProfileSetupScreenProps) {
   const {
     values,
     onChange,
+    onSelectAvatar,
     onSubmit,
     saving,
     error,
@@ -42,17 +45,30 @@ export default function ProfileSetupScreen(props: ProfileSetupScreenProps) {
           </p>
         )}
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <div className="flex items-center gap-4 rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-3">
-            <AvatarCircle avatarUrl={null} fallback={values.username} />
-            <label className="flex-1 text-xs uppercase tracking-[0.35em] text-slate-400">
-              Avatar
+          <div className="space-y-3 rounded-2xl border border-slate-600 bg-slate-950/60 px-4 py-4">
+            <div className="flex items-center gap-3">
+              <AvatarCircle avatarUrl={values.avatarUrl ?? null} fallback={values.username} />
+              <div className="text-xs uppercase tracking-[0.35em] text-slate-400">
+                Avatar
+                <p className="text-[0.65rem] normal-case text-slate-400/80">
+                  Choisissez un preset ou uploadez une image.
+                </p>
+              </div>
+            </div>
+            <AvatarPicker
+              value={values.avatarUrl}
+              username={values.username}
+              onSelect={onSelectAvatar}
+            />
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-600/70 px-3 py-2 text-[0.7rem] uppercase tracking-[0.35em] text-slate-200 transition hover:border-slate-400">
               <input
                 type="file"
                 accept="image/*"
-                className="mt-2 text-[0.7rem] text-slate-300"
+                className="hidden"
                 onChange={handleFileSelect}
                 disabled={uploadingAvatar}
               />
+              {uploadingAvatar ? "Upload en cours..." : "Uploader une image"}
             </label>
           </div>
           <label className="flex flex-col gap-2 text-sm text-slate-200">

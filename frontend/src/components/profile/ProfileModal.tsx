@@ -1,8 +1,10 @@
+import { AvatarPicker } from "@/components/ui/avatar-picker";
 import AvatarCircle from "../common/AvatarCircle";
 
 interface ProfileModalProps {
-  values: { username: string };
+  values: { username: string; avatarUrl?: string | null };
   onChange: (field: "username", value: string) => void;
+  onSelectAvatar: (avatarUrl: string) => void;
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
   saving: boolean;
@@ -21,6 +23,7 @@ export default function ProfileModal(props: ProfileModalProps) {
     onUploadAvatar,
     uploadingAvatar,
     avatarUrl,
+    onSelectAvatar,
   } = props;
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,11 +46,23 @@ export default function ProfileModal(props: ProfileModalProps) {
           Mettez à jour votre pseudo et votre avatar.
         </p>
         <form onSubmit={onSubmit} className="mt-4 space-y-4">
-          <div className="flex items-center gap-4 rounded-2xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
-            <AvatarCircle avatarUrl={avatarUrl ?? null} fallback={values.username} />
-            <div className="flex-1 text-xs text-slate-300">
-              <p className="uppercase tracking-[0.35em]">Avatar</p>
-              <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-600/70 px-3 py-1 text-[0.6rem] uppercase tracking-[0.35em] text-slate-200 transition hover:border-slate-400">
+          <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 px-4 py-4">
+            <div className="flex items-center gap-4">
+              <AvatarCircle avatarUrl={values.avatarUrl ?? avatarUrl ?? null} fallback={values.username} />
+              <div className="flex-1 text-xs text-slate-300">
+                <p className="uppercase tracking-[0.35em]">Avatar</p>
+                <p className="text-[0.7rem] text-slate-400">
+                  Choisissez un avatar de base ou uploadez une image.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-4">
+              <AvatarPicker
+                value={values.avatarUrl ?? avatarUrl}
+                username={values.username}
+                onSelect={onSelectAvatar}
+              />
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-600/70 px-3 py-2 text-[0.7rem] uppercase tracking-[0.35em] text-slate-200 transition hover:border-slate-400">
                 <input
                   type="file"
                   accept="image/*"
@@ -55,7 +70,7 @@ export default function ProfileModal(props: ProfileModalProps) {
                   onChange={handleFileSelect}
                   disabled={uploadingAvatar}
                 />
-                {uploadingAvatar ? "Upload en cours..." : "Uploader une image"}
+                {uploadingAvatar ? "Upload en cours..." : "Uploader votre photo"}
               </label>
             </div>
           </div>
