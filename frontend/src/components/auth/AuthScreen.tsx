@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
 import { config } from "../../config";
 import { supabase } from "../../lib/supabaseClient";
 import { CARD_OVERLAY_SVG } from "../../constants/ui";
@@ -124,7 +125,19 @@ export default function AuthScreen(props: AuthScreenProps) {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-[#041826] to-slate-950 px-6 py-12 font-sans text-slate-100">
+    <BackgroundGradientAnimation
+      gradientBackgroundStart="rgb(3, 7, 18)"
+      gradientBackgroundEnd="rgb(7, 24, 64)"
+      firstColor="56, 189, 248"
+      secondColor="74, 222, 128"
+      thirdColor="129, 140, 248"
+      fourthColor="248, 113, 113"
+      fifthColor="34, 211, 238"
+      pointerColor="94, 234, 212"
+      size="110%"
+      blendingValue="screen"
+      className="relative flex min-h-screen w-full items-center justify-center px-6 py-12 font-sans text-slate-100"
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.15),_transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(56,189,248,0.12),_transparent_60%)]" />
       <div
@@ -139,7 +152,7 @@ export default function AuthScreen(props: AuthScreenProps) {
       >
         <img src={CARD_OVERLAY_SVG} alt="" className="h-44 w-auto" />
       </div>
-      <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] items-center justify-center">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] items-center justify-center">
         <div className="grid w-full max-w-6xl gap-8 lg:grid-cols-[1.05fr_0.85fr]">
           <div className="rounded-[2.5rem] border border-slate-800/70 bg-slate-950/85 p-10 shadow-[0_35px_80px_-45px_rgba(0,0,0,1)] backdrop-blur">
             <div className="flex items-start justify-between gap-6">
@@ -291,6 +304,6 @@ export default function AuthScreen(props: AuthScreenProps) {
           </div>
         </div>
       </div>
-    </div>
+    </BackgroundGradientAnimation>
   );
 }

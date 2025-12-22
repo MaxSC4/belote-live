@@ -69,6 +69,39 @@ const config: Config = {
           "75%": { transform: "translateY(0) scale(0.98) rotate(0deg)", opacity: "0.95" },
           "100%": { transform: "translateY(4px) scale(1) rotate(-2deg)", opacity: "0.9" },
         },
+        moveHorizontal: {
+          "0%": {
+            transform: "translateX(-50%) translateY(-10%)",
+          },
+          "50%": {
+            transform: "translateX(50%) translateY(10%)",
+          },
+          "100%": {
+            transform: "translateX(-50%) translateY(-10%)",
+          },
+        },
+        moveInCircle: {
+          "0%": {
+            transform: "rotate(0deg)",
+          },
+          "50%": {
+            transform: "rotate(180deg)",
+          },
+          "100%": {
+            transform: "rotate(360deg)",
+          },
+        },
+        moveVertical: {
+          "0%": {
+            transform: "translateY(-50%)",
+          },
+          "50%": {
+            transform: "translateY(50%)",
+          },
+          "100%": {
+            transform: "translateY(-50%)",
+          },
+        },
       },
       animation: {
         "trick-from-top": "trick-from-top 0.22s ease-out",
@@ -81,6 +114,11 @@ const config: Config = {
         "hand-shuffle": "hand-shuffle 0.35s ease-out",
         "trick-spotlight": "trick-spotlight 2s ease-out",
         "reaction-pop": "reaction-pop 1.2s ease-in-out infinite alternate",
+        first: "moveVertical 30s ease infinite",
+        second: "moveInCircle 20s reverse infinite",
+        third: "moveInCircle 40s linear infinite",
+        fourth: "moveHorizontal 40s ease infinite",
+        fifth: "moveInCircle 20s ease infinite",
       },
     },
   },

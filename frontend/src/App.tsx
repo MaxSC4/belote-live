@@ -13,6 +13,7 @@ import SeatBanner from "./components/game/SeatBanner";
 import TrickCardView from "./components/game/TrickCardView";
 import TrickWinnerSpotlight from "./components/game/TrickWinnerSpotlight";
 import { Crown, Shuffle, Smile } from "lucide-react";
+import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
 import CardSvg from "./components/game/cards/CardSvg";
 import ProfileModal from "./components/profile/ProfileModal";
 import ProfileSetupScreen from "./components/profile/ProfileSetupScreen";
@@ -1278,40 +1279,62 @@ function App() {
   if (view === "lobby") {
     return (
       <>
-        <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-[#021324] to-slate-950 px-6 py-12 font-sans text-slate-100">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-[radial-gradient(circle_at_top,_rgba(94,234,212,0.25),_transparent_60%)]" />
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-[radial-gradient(circle_at_bottom,_rgba(14,165,233,0.2),_transparent_60%)]" />
-          <div
-            className="pointer-events-none absolute left-10 top-20 hidden rotate-[-15deg] opacity-50 lg:block"
-            style={{ filter: "drop-shadow(0 25px 40px rgba(14,165,233,0.25))" }}
-          >
-            <img src={CARD_OVERLAY_SVG} alt="" className="h-36 w-auto" />
-          </div>
-          <div
-            className="pointer-events-none absolute bottom-14 right-12 hidden rotate-[10deg] opacity-60 lg:block"
-            style={{ filter: "drop-shadow(0 35px 45px rgba(16,185,129,0.3))" }}
-          >
-            <img src={CARD_OVERLAY_SVG} alt="" className="h-32 w-auto" />
-          </div>
-          <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col justify-center">
-            <div className="mb-8 text-center">
-              <p className="text-xs uppercase tracking-[0.6em] text-emerald-200/70">Belote Live</p>
-              <h2 className="mt-2 text-4xl font-semibold text-white">Choisissez votre table ou brillez au Hall of Fame</h2>
-              <p className="mt-3 text-sm text-slate-300">
-                Créez une salle privée, entrez un code partagé ou admirez les légendes de Belote Live.
-              </p>
-            </div>
-            <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-[2.5rem] border border-slate-800/70 bg-slate-950/85 p-10 shadow-[0_35px_80px_-45px_rgba(0,0,0,1)] backdrop-blur">
-                <div className="flex flex-wrap items-center justify-between gap-6">
+        <BackgroundGradientAnimation
+          gradientBackgroundStart="rgb(3, 7, 18)"
+          gradientBackgroundEnd="rgb(7, 24, 64)"
+          firstColor="56, 189, 248"
+          secondColor="74, 222, 128"
+          thirdColor="129, 140, 248"
+          fourthColor="248, 113, 113"
+          fifthColor="34, 211, 238"
+          pointerColor="94, 234, 212"
+          size="110%"
+          blendingValue="screen"
+          className="relative flex min-h-screen w-full items-stretch justify-center px-4 py-10 md:px-8 md:py-14 lg:px-10"
+        >
+          <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-10 text-slate-50">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-4 lg:max-w-3xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[0.65rem] uppercase tracking-[0.35em] text-cyan-100/80 backdrop-blur">
+                  <span>Belote Live</span>
+                </div>
+                <h1 className="text-4xl font-semibold leading-tight text-white md:text-5xl">
+                  Créez une table, invitez vos partenaires et lancez la donne en quelques secondes.
+                </h1>
+                <p className="text-base text-slate-200 md:text-lg">
+                  Rien de mieux qu&apos;une belote pour passer le temps ?
+                </p>
+              </div>
+              <div className="rounded-3xl border border-white/15 bg-white/10 px-5 py-4 text-sm shadow-[0_25px_60px_-30px_rgba(0,0,0,0.45)] backdrop-blur">
+                <div className="flex items-center gap-3">
+                  <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
                   <div>
-                    <p className="text-xs uppercase tracking-[0.5em] text-cyan-200/70">Table privée</p>
-                    <h3 className="mt-2 text-3xl font-semibold text-white">Créez ou rejoignez une partie</h3>
-                    <p className="text-sm text-slate-400">
-                      Choisissez un code unique, partagez-le et lancez la donne avec votre crew.
+                    <p className="text-xs uppercase tracking-[0.35em] text-slate-200/70">
+                      Connecté en tant que
+                    </p>
+                    <p className="text-lg font-semibold text-white">{profile.username}</p>
+                    <p className="text-xs text-emerald-100/80">
+                      {profileWinrate}% WR · {profile.wins} victoires
                     </p>
                   </div>
-                  <span className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-xs font-medium uppercase tracking-[0.5em] text-emerald-200">
+                </div>
+                <p className="mt-3 rounded-2xl bg-white/5 px-4 py-2 text-xs text-slate-200/80">
+                  Votre profil alimente les stats de table et les scores du Hall of Fame.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-3xl border border-white/15 bg-slate-950/70 p-8 shadow-[0_35px_80px_-45px_rgba(0,0,0,0.9)] backdrop-blur">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.35em] text-cyan-100/70">Table privée</p>
+                    <h3 className="mt-2 text-2xl font-semibold text-white">Code unique, accès instantané</h3>
+                    <p className="text-sm text-slate-300">
+                      Générer un code, le partager et démarrer la partie sans détour.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-emerald-300/40 bg-emerald-400/15 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-emerald-100">
                     4 joueurs
                   </span>
                 </div>
@@ -1319,26 +1342,13 @@ function App() {
                 <button
                   type="button"
                   onClick={handleCreateRoom}
-                  className="mt-8 flex w-full items-center justify-between rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-500/25 via-emerald-400/20 to-sky-500/30 px-5 py-4 text-base font-semibold text-cyan-100 transition hover:border-cyan-200 hover:shadow-[0_25px_45px_-25px_rgba(6,182,212,0.8)]"
+                  className="mt-8 flex w-full items-center justify-between rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-500/30 via-emerald-400/20 to-sky-500/30 px-5 py-4 text-base font-semibold text-cyan-50 transition hover:border-cyan-200 hover:shadow-[0_25px_45px_-25px_rgba(6,182,212,0.8)]"
                 >
                   <span>Générer un code aléatoire</span>
                   <span className="text-lg">🔁</span>
                 </button>
 
-                <form onSubmit={handleJoin} className="mt-10 flex flex-col gap-6">
-                  <div className="flex items-center gap-4 rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-4 shadow-inner shadow-black/20">
-                    <AvatarCircle avatarUrl={profile.avatar_url} fallback={profile.username} />
-                    <div className="flex-1">
-                      <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-                        Connecté en tant que
-                      </p>
-                      <p className="text-lg font-semibold text-white">{profile.username}</p>
-                      <p className="text-xs text-slate-400">
-                        {profileWinrate}% WR · {profile.wins} victoires
-                      </p>
-                    </div>
-                  </div>
-
+                <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
                   <label className="flex flex-col gap-2 text-sm text-slate-200">
                     Code de table
                     <input
@@ -1346,23 +1356,23 @@ function App() {
                       value={roomCode}
                       onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                       placeholder="Ex : TABLE42"
-                      className="w-full rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-4 text-base tracking-[0.25em] text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300/40"
+                      className="w-full rounded-2xl border border-white/20 bg-white/5 px-5 py-4 text-base tracking-[0.25em] text-white outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300/40"
                     />
                   </label>
 
                   <button
                     type="submit"
-                    className="mt-2 rounded-2xl bg-gradient-to-r from-emerald-400 via-green-400 to-emerald-300 px-5 py-4 text-base font-semibold uppercase tracking-[0.35em] text-slate-900 transition hover:brightness-110"
+                    className="rounded-2xl bg-gradient-to-r from-emerald-400 via-green-400 to-emerald-300 px-5 py-4 text-base font-semibold uppercase tracking-[0.35em] text-slate-900 transition hover:brightness-110"
                   >
                     Rejoindre la table
                   </button>
                 </form>
               </div>
 
-              <div className="rounded-[2.5rem] border border-emerald-400/20 bg-gradient-to-br from-emerald-400/10 via-transparent to-cyan-400/5 p-8 shadow-[0_35px_70px_-45px_rgba(16,185,129,0.6)] backdrop-blur">
-                <div className="flex items-center justify-between">
+              <div className="rounded-3xl border border-white/15 bg-white/10 p-8 shadow-[0_35px_70px_-45px_rgba(15,23,42,0.7)] backdrop-blur">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.6em] text-emerald-200/70">Hall of Fame</p>
+                    <p className="text-xs uppercase tracking-[0.35em] text-emerald-200/80">Hall of Fame</p>
                     <h3 className="mt-2 text-2xl font-semibold text-white">Les légendes du moment</h3>
                     <p className="text-sm text-emerald-50/80">
                       Winrate et parties gagnées.
@@ -1374,7 +1384,7 @@ function App() {
                   {hallOfFame.map((player, index) => (
                     <div
                       key={`${player.name}-${index}`}
-                      className="group flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white shadow-[0_20px_45px_-35px_rgba(8,145,178,1)] transition hover:border-white/30"
+                      className="group flex items-center justify-between rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-sm text-white shadow-[0_20px_45px_-35px_rgba(8,145,178,1)] transition hover:border-white/30 hover:bg-white/15"
                     >
                       <div className="flex items-center gap-4">
                         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/20 text-lg font-semibold text-emerald-200">
@@ -1395,12 +1405,12 @@ function App() {
                   ))}
                 </div>
                 <p className="mt-6 text-center text-xs uppercase tracking-[0.4em] text-emerald-50/70">
-                  Pas mal, non ?
+                  Prêt à prendre la place ?
                 </p>
               </div>
             </div>
           </div>
-        </div>
+        </BackgroundGradientAnimation>
         {profileQuickAccess}
         {profileModal}
       </>

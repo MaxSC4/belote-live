@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      "@": path.resolve(__dirname, "src"),
       "animejs/lib/anime.es.js": path.resolve(
         __dirname,
         "node_modules/animejs/lib/anime.es.js"
