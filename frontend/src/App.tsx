@@ -12,7 +12,7 @@ import ReactionBubble from "./components/game/ReactionBubble";
 import SeatBanner from "./components/game/SeatBanner";
 import TrickCardView from "./components/game/TrickCardView";
 import TrickWinnerSpotlight from "./components/game/TrickWinnerSpotlight";
-import { Crown, Shuffle, Smile } from "lucide-react";
+import { Crown, RefreshCw, Shuffle, Smile, Trophy } from "lucide-react";
 import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
 import CardSvg from "./components/game/cards/CardSvg";
 import ProfileModal from "./components/profile/ProfileModal";
@@ -1362,7 +1362,7 @@ function App() {
                   className="mt-8 flex w-full items-center justify-between rounded-2xl border border-cyan-300/50 bg-gradient-to-r from-cyan-500/30 via-emerald-400/20 to-sky-500/30 px-5 py-4 text-base font-semibold text-cyan-50 transition hover:border-cyan-200 hover:shadow-[0_25px_45px_-25px_rgba(6,182,212,0.8)]"
                 >
                   <span>Générer un code aléatoire</span>
-                  <span className="text-lg">🔁</span>
+                  <RefreshCw className="h-5 w-5" aria-hidden="true" />
                 </button>
 
                 <form onSubmit={handleJoin} className="mt-8 flex flex-col gap-6">
@@ -1395,7 +1395,7 @@ function App() {
                       Winrate et parties gagnées.
                     </p>
                   </div>
-                  <span className="text-3xl">🏆</span>
+                  <Trophy className="h-8 w-8 text-emerald-200" aria-hidden="true" />
                 </div>
                 <div className="mt-6 space-y-4">
                   {hallOfFame.map((player, index) => (
