@@ -10,6 +10,7 @@ export interface RoomPlayer {
   seat: number | null;
   userId?: string | null;
   avatarUrl?: string | null;
+  connected?: boolean;
   stats?: PlayerStatsPayload;
 }
 

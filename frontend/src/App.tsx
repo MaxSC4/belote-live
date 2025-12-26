@@ -68,6 +68,35 @@ type GameStateMessage = {
   };
 };
 
+type SessionEstablishedMessage = {
+  type: "session_established";
+  payload: {
+    sessionId: string;
+    sessionToken: string;
+    roomCode: string;
+    seat: number;
+    nickname: string;
+    isGuest: boolean;
+    expiresAt: number;
+    rejoined?: boolean;
+  };
+};
+
+type SessionKickedMessage = {
+  type: "session_kicked";
+  payload: {
+    reason: string;
+  };
+};
+
+type TableClosedMessage = {
+  type: "table_closed";
+  payload: {
+    roomCode: string;
+    reason: string;
+  };
+};
+
 type TrickCardPlacement = {
   player: number;
   card: Card;
@@ -76,6 +105,12 @@ type TrickCardPlacement = {
 };
 
 type SuitSymbol = Suit;
+type StoredSession = {
+  sessionId: string;
+  sessionToken: string;
+  roomCode: string;
+};
+
 const SUIT_SYMBOLS: SuitSymbol[] = ["♠", "♥", "♦", "♣"];
 const PHASE_LABELS: Record<string, string> = {
   ChoosingTrumpFirstRound: "Prise · 1ᵉʳ tour",
@@ -124,6 +159,9 @@ const PLACEHOLDER_HALL_OF_FAME: HallOfFameEntry[] = [
 
 const DEFAULT_GUEST_AVATAR =
   "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTI4IDEyOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjMzhiZGY4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTBiOTgxIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PGNpcmNsZSBjeD0iNjQiIGN5PSI2NCIgcj0iNjAiIGZpbGw9InVybCgjZykiLz48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9Ii44NSIgZD0iTTY0IDM0Yy0xMy4yIDAtMjQgMTAuOC0yNCAyNHMxMC44IDI0IDI0IDI0IDI0LTEwLjggMjQtMjQtMTAuOC0yNC0yNC0yNHptMCA1NmMtMTkgMC0zNS4zIDEwLjktNDMuOCAyNS43IDEyIDcuOCAyNy4zIDEyLjMgNDMuOCAxMi4zczMxLjgtNC41IDQzLjgtMTIuM0M5OS4zIDEwMC45IDgzIDkwIDY0IDkweiIvPjwvc3ZnPg==";
+const SESSION_STORAGE_KEY = "belote.session";
+const RECONNECT_BASE_DELAY_MS = 600;
+const RECONNECT_MAX_DELAY_MS = 6000;
 
 // message pour choose_trump
 type ChooseTrumpPayloadWS =
@@ -143,12 +181,30 @@ function App() {
   const [wsStatus, setWsStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<RoomPlayer[]>([]);
   const [wsError, setWsError] = useState<string | null>(null);
 
   const [gameState, setGameState] = useState<GameStateWS | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const shouldReconnectRef = useRef(false);
+  const [storedSession, setStoredSession] = useState<StoredSession | null>(() => {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as StoredSession;
+    } catch {
+      return null;
+    }
+  });
+  const storedSessionRef = useRef<StoredSession | null>(storedSession);
+  useEffect(() => {
+    storedSessionRef.current = storedSession;
+  }, [storedSession]);
 
   // Animations : bannière gagnant de pli + overlay fin de donne
   const [showTrickWinnerBanner, setShowTrickWinnerBanner] = useState(false);
@@ -227,6 +283,16 @@ function App() {
     []
   );
 
+  const persistSession = useCallback((next: StoredSession | null) => {
+    setStoredSession(next);
+    if (typeof window === "undefined") return;
+    if (next) {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next));
+    } else {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  }, []);
+
   const logAnimation = useCallback(
     (message: string, payload?: Record<string, unknown>) => {
       if (!logAnimations) return;
@@ -273,7 +339,12 @@ function App() {
 
   const handleJoin = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!profile || !roomCode) return;
+    const normalizedRoom = roomCode.trim().toUpperCase();
+    if (!profile || !normalizedRoom) return;
+    if (storedSessionRef.current && storedSessionRef.current.roomCode !== normalizedRoom) {
+      persistSession(null);
+    }
+    setRoomCode(normalizedRoom);
     const hasAccessToken = Boolean(session?.access_token);
     const isGuestProfile = Boolean(profile.isGuest);
     if (!hasAccessToken && !isGuestProfile) return;
@@ -290,10 +361,17 @@ function App() {
 
   useEffect(() => {
     if (view !== "game") {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
+      shouldReconnectRef.current = false;
+      setIsReconnecting(false);
+      reconnectAttemptsRef.current = 0;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
-      wsRef.current = null;
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       setWsStatus("disconnected");
       setRoomPlayers([]);
       setWsError(null);
@@ -311,6 +389,11 @@ function App() {
       return;
     }
 
+    if (!roomCode) {
+      setWsError("Code table manquant.");
+      return;
+    }
+
     const accessToken = session?.access_token ?? null;
 
     if (!accessToken && !isGuestProfile) {
@@ -318,73 +401,167 @@ function App() {
       return;
     }
 
+    shouldReconnectRef.current = true;
     setWsStatus("connecting");
     setWsError(null);
 
-    const ws = new WebSocket(config.wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setWsStatus("connected");
-      const joinPayload: {
-        roomCode: string;
-        nickname: string;
-        accessToken?: string;
-        guest?: { id: string; username: string; avatarUrl?: string | null };
-      } = {
-        roomCode,
-        nickname,
-      };
-      if (accessToken) {
-        joinPayload.accessToken = accessToken;
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
-      if (isGuestProfile && profileId) {
-        joinPayload.guest = {
-          id: profileId,
-          username: profileUsername,
-          avatarUrl: profileAvatarUrl ?? DEFAULT_GUEST_AVATAR,
-        };
-      }
-      ws.send(
-        JSON.stringify({
-          type: "join_room",
-          payload: joinPayload,
-        })
-      );
     };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as
-          | RoomUpdateMessage
-          | ErrorMessage
-          | GameStateMessage;
+    const scheduleReconnect = () => {
+      if (!shouldReconnectRef.current) return;
+      clearReconnectTimer();
+      const nextAttempt = reconnectAttemptsRef.current + 1;
+      reconnectAttemptsRef.current = nextAttempt;
+      const delay = Math.min(RECONNECT_BASE_DELAY_MS * nextAttempt, RECONNECT_MAX_DELAY_MS);
+      setIsReconnecting(true);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        openSocket("reconnect");
+      }, delay);
+    };
 
-        if (data.type === "room_update") {
-          if (data.payload.roomCode === roomCode) {
-            setRoomPlayers(data.payload.players);
+    const openSocket = (reason: "fresh" | "reconnect" = "fresh") => {
+      if (!shouldReconnectRef.current) return;
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+      setWsStatus("connecting");
+      if (reason === "reconnect") {
+        setIsReconnecting(true);
+      }
+      const ws = new WebSocket(config.wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setWsStatus("connected");
+        setIsReconnecting(false);
+        reconnectAttemptsRef.current = 0;
+        const stored = storedSessionRef.current;
+        const canRejoin = stored && stored.roomCode === roomCode;
+        if (canRejoin) {
+          ws.send(
+            JSON.stringify({
+              type: "rejoin_table",
+              payload: { sessionToken: stored.sessionToken, roomCode },
+            })
+          );
+        } else {
+          const joinPayload: {
+            roomCode: string;
+            nickname: string;
+            accessToken?: string;
+            guest?: { id: string; username: string; avatarUrl?: string | null };
+          } = {
+            roomCode,
+            nickname: nickname || profileUsername || "Joueur",
+          };
+          if (accessToken) {
+            joinPayload.accessToken = accessToken;
           }
-        } else if (data.type === "error") {
-          setWsError(data.payload.message);
-        } else if (data.type === "game_state") {
-          setGameState(data.payload.state);
+          if (isGuestProfile && profileId) {
+            joinPayload.guest = {
+              id: profileId,
+              username: profileUsername || nickname || "Invité",
+              avatarUrl: profileAvatarUrl ?? DEFAULT_GUEST_AVATAR,
+            };
+          }
+          ws.send(
+            JSON.stringify({
+              type: "join_table",
+              payload: joinPayload,
+            })
+          );
         }
-      } catch (error) {
-        console.error("Message WS invalide", error);
-      }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as
+            | RoomUpdateMessage
+            | ErrorMessage
+            | GameStateMessage
+            | SessionEstablishedMessage
+            | SessionKickedMessage
+            | TableClosedMessage;
+
+          if (data.type === "session_established") {
+            persistSession({
+              sessionId: data.payload.sessionId,
+              sessionToken: data.payload.sessionToken,
+              roomCode: data.payload.roomCode,
+            });
+            setNickname((current) => current || data.payload.nickname);
+            setWsError(null);
+            setIsReconnecting(false);
+            setWsStatus("connected");
+          } else if (data.type === "session_kicked") {
+            addToast(data.payload.reason || "Session utilisée ailleurs");
+            shouldReconnectRef.current = false;
+            clearReconnectTimer();
+            setIsReconnecting(false);
+            setWsStatus("disconnected");
+            persistSession(null);
+            if (wsRef.current) {
+              wsRef.current.close();
+            }
+            setView("lobby");
+          } else if (data.type === "table_closed") {
+            addToast(`Table fermée (${data.payload.reason})`, "info");
+            shouldReconnectRef.current = false;
+            clearReconnectTimer();
+            setIsReconnecting(false);
+            setWsStatus("disconnected");
+            persistSession(null);
+            setGameState(null);
+            setRoomPlayers([]);
+            if (wsRef.current) {
+              wsRef.current.close();
+            }
+            setView("lobby");
+          } else if (data.type === "room_update") {
+            if (data.payload.roomCode === roomCode) {
+              setRoomPlayers(data.payload.players);
+            }
+          } else if (data.type === "error") {
+            setWsError(data.payload.message);
+            if (data.payload.message.toLowerCase().includes("session")) {
+              persistSession(null);
+            }
+          } else if (data.type === "game_state") {
+            setGameState(data.payload.state);
+            setIsReconnecting(false);
+          }
+        } catch (error) {
+          console.error("Message WS invalide", error);
+        }
+      };
+
+      ws.onerror = () => {
+        setWsStatus("disconnected");
+        setWsError("Erreur de connexion WebSocket.");
+      };
+
+      ws.onclose = () => {
+        setWsStatus("disconnected");
+        if (shouldReconnectRef.current) {
+          scheduleReconnect();
+        }
+      };
     };
 
-    ws.onerror = () => {
-      setWsStatus("disconnected");
-      setWsError("Erreur de connexion WebSocket.");
-    };
-
-    ws.onclose = () => {
-      setWsStatus("disconnected");
-    };
+    openSocket("fresh");
 
     return () => {
-      ws.close();
+      shouldReconnectRef.current = false;
+      clearReconnectTimer();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, [
     view,
@@ -396,6 +573,8 @@ function App() {
     profileAvatarUrl,
     isGuestProfile,
     hasProfile,
+    addToast,
+    persistSession,
   ]);
 
   const handleStartGame = () => {
@@ -404,6 +583,7 @@ function App() {
   };
 
   const handleSignOut = async () => {
+    persistSession(null);
     if (profile?.isGuest) {
       setProfile(null);
       setProfileForm({ username: "", avatarUrl: null });
@@ -429,6 +609,7 @@ function App() {
   };
 
   const handleContinueAsGuest = () => {
+    persistSession(null);
     const guestId = `guest-${Date.now().toString(36)}-${Math.random()
       .toString(36)
       .slice(2, 6)}`;
@@ -576,8 +757,11 @@ function App() {
 
   // ---- INFOS JOUEURS / TABLE ----
 
+  const mySessionId = storedSession?.sessionId ?? null;
   const mySeat =
-    roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null;
+    (mySessionId
+      ? roomPlayers.find((p) => p.id === mySessionId)?.seat ?? null
+      : roomPlayers.find((p) => p.nickname === nickname)?.seat ?? null) ?? null;
 
   const fullHand: Card[] =
     gameState && mySeat !== null ? gameState.hands[String(mySeat)] || [] : [];
@@ -1621,6 +1805,7 @@ function App() {
     trumpSymbol === "♥" || trumpSymbol === "♦"
       ? "text-rose-300"
       : "text-slate-100";
+  const connectionState = isReconnecting ? "reconnecting" : wsStatus;
 
   return (
     <>
@@ -1637,6 +1822,17 @@ function App() {
       >
         <img src={CARD_OVERLAY_SVG} alt="" className="h-30 w-auto" />
       </div>
+      {isReconnecting && (
+        <div className="absolute inset-0 z-30 flex items-start justify-center bg-slate-950/50 px-4 pt-12">
+          <div className="flex items-center gap-3 rounded-2xl border border-amber-400/50 bg-slate-900/90 px-4 py-3 text-amber-100 shadow-[0_25px_55px_-30px_rgba(251,191,36,0.6)]">
+            <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <div className="text-sm">
+              <p className="font-semibold">Reconnexion…</p>
+              <p className="text-xs text-slate-200">Tentative automatique en cours</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* HEADER */}
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-900 pb-3">
         <div className="space-y-1">
@@ -1656,17 +1852,19 @@ function App() {
             <span
               className={cx(
                 "flex items-center gap-1 rounded-full border px-2 py-0.5",
-                wsStatus === "connected"
+                connectionState === "connected"
                   ? "border-emerald-400/80 text-emerald-200"
-                  : wsStatus === "connecting"
+                  : connectionState === "connecting" || connectionState === "reconnecting"
                   ? "border-amber-400/80 text-amber-200"
                   : "border-rose-400/80 text-rose-200"
               )}
             >
               <span className="text-lg">•</span>
-              {wsStatus === "connected"
+              {connectionState === "connected"
                 ? "Connecté"
-                : wsStatus === "connecting"
+                : connectionState === "reconnecting"
+                ? "Reconnexion..."
+                : connectionState === "connecting"
                 ? "Connexion en cours"
                 : "Déconnecté"}
             </span>
@@ -1700,10 +1898,10 @@ function App() {
             <button
               type="button"
               onClick={handleStartGame}
-              disabled={wsStatus !== "connected"}
+              disabled={connectionState !== "connected"}
               className={cx(
                 "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white transition",
-                wsStatus === "connected"
+                connectionState === "connected"
                   ? "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-500 shadow-[0_15px_30px_-18px_rgba(16,185,129,0.8)] hover:from-emerald-400 hover:to-emerald-400"
                   : "cursor-not-allowed bg-slate-600/70"
               )}
@@ -1714,7 +1912,10 @@ function App() {
 
             <button
               type="button"
-              onClick={() => setView("lobby")}
+              onClick={() => {
+                persistSession(null);
+                setView("lobby");
+              }}
               className="inline-flex items-center gap-2 rounded-full border border-slate-600 bg-transparent px-4 py-2 text-sm text-slate-100 transition hover:border-slate-400"
             >
               <DoorOpen className="h-4 w-4" />
