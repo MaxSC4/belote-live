@@ -51,8 +51,9 @@ export default function SeatBanner(props: SeatBannerProps) {
     >
       <div
         className={cx(
-          "w-40 rounded-2xl border border-slate-700/60 bg-slate-950/70 px-3 py-2 text-xs text-slate-100 shadow-[0_10px_25px_-20px_rgba(0,0,0,0.8)] transition",
-          isCurrent && "border-emerald-300/70 shadow-[0_14px_30px_-20px_rgba(16,185,129,0.4)]",
+          "w-40 rounded-2xl border border-slate-700/60 bg-slate-950/70 px-3 py-2 text-xs text-slate-100 shadow-[0_10px_25px_-20px_rgba(0,0,0,0.8)] transition-all duration-300 transform-gpu",
+          isCurrent &&
+            "border-emerald-300/80 shadow-[0_18px_40px_-22px_rgba(16,185,129,0.55)] scale-[1.02]",
           isTrumpChooser && "ring-1 ring-amber-300/70"
         )}
       >

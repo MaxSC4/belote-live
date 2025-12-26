@@ -34,6 +34,7 @@ import type { TablePosition } from "./types/table";
 import { TABLE_POSITIONS } from "./types/table";
 import { cx } from "./utils/cx";
 import { sortHandBySuitColor } from "./utils/cards";
+import { usePrefersReducedMotion } from "./utils/usePrefersReducedMotion";
 
 type View = "lobby" | "game";
 
@@ -67,6 +68,13 @@ type GameStateMessage = {
   };
 };
 
+type TrickCardPlacement = {
+  player: number;
+  card: Card;
+  position: TablePosition;
+  order: number;
+};
+
 type SuitSymbol = Suit;
 const SUIT_SYMBOLS: SuitSymbol[] = ["♠", "♥", "♦", "♣"];
 const PHASE_LABELS: Record<string, string> = {
@@ -75,6 +83,8 @@ const PHASE_LABELS: Record<string, string> = {
   PlayingTricks: "Pli en cours",
   Finished: "Donne terminée",
 };
+
+const randomBetween = (min: number, max: number) => Math.random() * (max - min) + min;
 
 const REACTION_EMOJIS = ["😄", "😡", "😢", "😎", "🤔", "🎉"] as const;
 
@@ -159,6 +169,7 @@ function App() {
   const dealScore1Ref = useRef<HTMLParagraphElement>(null);
   const playerHandRef = useRef<HTMLDivElement>(null);
   const turnBadgeRef = useRef<HTMLSpanElement>(null);
+  const eventBadgeRef = useRef<HTMLDivElement>(null);
 
   const cancelDealAnimation = useCallback(() => {
     dealTimeoutsRef.current.forEach((timeoutId) => {
@@ -193,6 +204,15 @@ function App() {
   const hasProfile = Boolean(profile);
   const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(PLACEHOLDER_HALL_OF_FAME);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [animationsEnabled, setAnimationsEnabled] = useState(true);
+  const [logAnimations] = useState(false);
+  const [renderedTrickCards, setRenderedTrickCards] = useState<TrickCardPlacement[]>([]);
+  const [trickCollectionTarget, setTrickCollectionTarget] = useState<TablePosition | null>(null);
+  const trickCollectTimeoutRef = useRef<number | null>(null);
+  const prevTrickSizeRef = useRef(0);
+  const prevBeloteStageRef = useRef(0);
+  const [eventBadge, setEventBadge] = useState<string | null>(null);
 
   const supabaseReady = Boolean(supabase);
 
@@ -205,6 +225,16 @@ function App() {
       }, 3200);
     },
     []
+  );
+
+  const logAnimation = useCallback(
+    (message: string, payload?: Record<string, unknown>) => {
+      if (!logAnimations) return;
+      // Keep logs lightweight and readable
+      // eslint-disable-next-line no-console
+      console.info("[motion]", message, payload ?? "");
+    },
+    [logAnimations]
   );
 
   useEffect(() => {
@@ -713,14 +743,61 @@ function App() {
     return gameState.hands[String(seat)]?.length ?? 0;
   };
 
-  const trickCardPlacements = useMemo(() => {
-    if (!gameState?.trick) return [];
-    return gameState.trick.cards.map((tc, order) => ({
+  useEffect(() => {
+    if (trickCollectTimeoutRef.current) {
+      clearTimeout(trickCollectTimeoutRef.current);
+      trickCollectTimeoutRef.current = null;
+    }
+
+    const trick = gameState?.trick;
+
+    if (!trick) {
+      if (trickCollectionTarget) return;
+      setRenderedTrickCards([]);
+      setTrickCollectionTarget(null);
+      prevTrickSizeRef.current = 0;
+      return;
+    }
+
+    const placements = trick.cards.map((tc, order) => ({
       ...tc,
       position: seatToTablePosition(tc.player) ?? "top",
       order,
     }));
-  }, [gameState?.trick, seatToTablePosition]);
+
+    if (!placements.length && trickCollectionTarget) {
+      return;
+    }
+
+    if (trick.cards.length > prevTrickSizeRef.current) {
+      const latest = trick.cards[trick.cards.length - 1];
+      logAnimation("trick:card-played", { seat: latest.player, order: placements.length });
+    }
+
+    prevTrickSizeRef.current = trick.cards.length;
+    setRenderedTrickCards(placements);
+
+    if (trick.winner !== undefined && trick.winner !== null && trick.cards.length === 4) {
+      const target = seatToTablePosition(trick.winner) ?? "bottom";
+      setTrickCollectionTarget(target);
+      logAnimation("trick:collect", { winner: trick.winner, target });
+      const clearDelay = prefersReducedMotion || !animationsEnabled ? 240 : 560;
+      trickCollectTimeoutRef.current = window.setTimeout(() => {
+        setRenderedTrickCards([]);
+        setTrickCollectionTarget(null);
+        prevTrickSizeRef.current = 0;
+      }, clearDelay);
+    } else {
+      setTrickCollectionTarget(null);
+    }
+  }, [
+    gameState?.trick,
+    seatToTablePosition,
+    prefersReducedMotion,
+    animationsEnabled,
+    logAnimation,
+    trickCollectionTarget,
+  ]);
 
   useEffect(() => {
     if (!playerHandRef.current) return;
@@ -731,17 +808,50 @@ function App() {
       const newestCard = shells[shells.length - 1];
       if (newestCard) {
         anime.remove(newestCard);
-        anime({
-          targets: newestCard,
-          translateY: [-18, 0],
-          opacity: [0, 1],
-          easing: "easeOutQuad",
-          duration: 360,
-        });
+
+        if (!animationsEnabled || prefersReducedMotion) {
+          newestCard.style.opacity = "1";
+          newestCard.style.transform = "translate3d(0,0,0)";
+        } else {
+          const lateralDrift = randomBetween(-18, 18);
+          const tilt = randomBetween(-2.2, 2.2);
+          anime({
+            targets: newestCard,
+            keyframes: [
+              {
+                translateX: lateralDrift,
+                translateY: 24,
+                rotateZ: tilt * 1.4,
+                opacity: 0,
+                easing: "easeOutQuad",
+                duration: 90,
+                scale: 0.96,
+              },
+              {
+                translateX: lateralDrift * 0.35,
+                translateY: 6,
+                rotateZ: tilt * 0.6,
+                opacity: 1,
+                easing: "easeOutCubic",
+                duration: 140,
+                scale: 1.02,
+              },
+              {
+                translateX: 0,
+                translateY: 0,
+                rotateZ: tilt * 0.2,
+                easing: "easeOutBack",
+                duration: 130,
+                scale: 1,
+              },
+            ],
+          });
+          logAnimation("deal:card-in", { index: shells.length - 1 });
+        }
       }
       incomingCardsRef.current = Math.max(0, incomingCardsRef.current - 1);
     }
-  }, [displayHand, isSorting]);
+  }, [displayHand, isSorting, animationsEnabled, prefersReducedMotion, logAnimation]);
 
   useEffect(() => {
     if (!turnBadgeRef.current) return;
@@ -1007,6 +1117,32 @@ function App() {
   }, [trickWinner]);
 
   useEffect(() => {
+    const stage = gameState?.belote.stage ?? 0;
+    if (stage > prevBeloteStageRef.current) {
+      const label = stage === 1 ? "Belote !" : "Belote & Rebelote";
+      setEventBadge(label);
+      logAnimation("badge:belote", { stage });
+    }
+    prevBeloteStageRef.current = stage;
+  }, [gameState?.belote.stage, logAnimation]);
+
+  useEffect(() => {
+    if (!eventBadge || !eventBadgeRef.current) return;
+    anime.remove(eventBadgeRef.current);
+    const duration = prefersReducedMotion ? 220 : 520;
+    anime({
+      targets: eventBadgeRef.current,
+      translateY: [-10, 0],
+      scale: [0.92, 1],
+      opacity: [0, 1],
+      easing: "easeOutBack",
+      duration,
+    });
+    const timer = window.setTimeout(() => setEventBadge(null), prefersReducedMotion ? 900 : 1600);
+    return () => clearTimeout(timer);
+  }, [eventBadge, prefersReducedMotion]);
+
+  useEffect(() => {
     const phase = gameState?.phase;
     const prev = prevPhaseRef.current;
 
@@ -1034,6 +1170,10 @@ function App() {
       window.removeEventListener("orientationchange", updateViewport);
     };
   }, []);
+
+  useEffect(() => {
+    setAnimationsEnabled(!prefersReducedMotion);
+  }, [prefersReducedMotion]);
 
   useEffect(() => {
     setSidebarOpen(!isMobile);
@@ -1074,19 +1214,27 @@ function App() {
       if (reset) {
         setDisplayHand([]);
       }
+
+      if (!animationsEnabled || prefersReducedMotion) {
+        setDisplayHand((current) => (reset ? cards : [...current, ...cards]));
+        return;
+      }
+
       incomingCardsRef.current += cards.length;
       cards.forEach((card, idx) => {
         const timeoutId = window.setTimeout(() => {
           setDisplayHand((current) => [...current, card]);
-        }, idx * 220);
+        }, idx * 120 + randomBetween(40, 120));
         dealTimeoutsRef.current.push(timeoutId);
       });
     };
 
     if (isNewDeal) {
+      logAnimation("deal:start", { cards: full.length });
       scheduleCards(full, true);
     } else if (isCompletingHand) {
       const newCards = full.slice(prev.length);
+      logAnimation("deal:complete-hand", { added: newCards.length });
       scheduleCards(newCards);
     } else if (full.length !== prev.length) {
       setDisplayHand(full);
@@ -1096,7 +1244,7 @@ function App() {
     return () => {
       cancelDealAnimation();
     };
-  }, [gameState, mySeat, cancelDealAnimation]);
+  }, [gameState, mySeat, cancelDealAnimation, animationsEnabled, prefersReducedMotion, logAnimation]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -1780,13 +1928,17 @@ function App() {
 
               {/* PLI */}
               <div className="relative col-start-2 row-start-2 aspect-square w-full max-w-[520px] place-self-center">
-                {trickCardPlacements.map((tc) => (
+                {renderedTrickCards.map((tc, idx) => (
                   <TrickCardView
                     key={`${tc.player}-${tc.order}`}
                     position={tc.position}
                     card={tc.card}
                     playerLabel={shortSeatLabel(tc.player)}
                     order={tc.order}
+                    collectTo={trickCollectionTarget}
+                    stackIndex={idx}
+                    animationsEnabled={animationsEnabled}
+                    prefersReducedMotion={prefersReducedMotion}
                   />
                 ))}
               </div>
@@ -1948,6 +2100,7 @@ function App() {
               {displayHand.map((card, index) => {
                 const total = displayHand.length;
                 const clickable = Boolean(isMyTurn);
+                const playable = clickable;
 
                 const maxAngle = 18;
                 const angleStep = total > 1 ? (maxAngle * 2) / (total - 1) : 0;
@@ -1959,9 +2112,15 @@ function App() {
                 const baseTransform = `translateX(-50%) translateX(${centerShift}px) translateY(${offsetY}px) rotate(${angle}deg)`;
 
                 const isHovered = clickable && hoveredIndex === index;
-                const finalTransform = isHovered
-                  ? `${baseTransform} translateY(-8px)`
-                  : baseTransform;
+                const restScale = playable ? 1.015 : 1;
+                const hoverScale = playable ? 1.06 : 1.04;
+                const finalTransform = `${baseTransform}${isHovered ? " translateY(-10px)" : ""} scale(${isHovered ? hoverScale : restScale})`;
+
+                const boxShadow = isHovered
+                  ? "0 22px 38px -26px rgba(16,185,129,0.8)"
+                  : playable
+                  ? "0 18px 32px -24px rgba(16,185,129,0.55)"
+                  : "0 18px 32px -24px rgba(0,0,0,0.85)";
 
                 return (
                   <button
@@ -1979,7 +2138,8 @@ function App() {
                       transformOrigin: "50% 100%",
                       cursor: clickable ? "pointer" : "default",
                       filter: isHovered ? "brightness(1.05)" : "none",
-                      transition: "transform 0.15s ease-out, filter 0.15s ease-out",
+                      boxShadow,
+                      transition: "transform 0.18s ease-out, filter 0.18s ease-out, box-shadow 0.18s ease-out",
                     }}
                   >
                     <div className="player-hand-card-inner">
@@ -2051,6 +2211,15 @@ function App() {
               OK
             </button>
           </div>
+        </div>
+      )}
+
+      {eventBadge && (
+        <div
+          ref={eventBadgeRef}
+          className="pointer-events-none fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-full border border-emerald-300/70 bg-emerald-500/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-emerald-50 shadow-[0_14px_32px_-20px_rgba(16,185,129,0.65)]"
+        >
+          {eventBadge}
         </div>
       )}
 
